@@ -45,22 +45,17 @@ static fl2k_dev_t *dev = NULL;
 static volatile int do_exit = 0;
 static volatile int repeat = 1;
 
+uint32_t samp_rate = 100000000;
+
 //input file
 FILE *file_r;
 FILE *file_g;
 FILE *file_b;
 
-FILE *tmp_file;
-
 //buffer for tx
 char *txbuf_r = NULL;
 char *txbuf_g = NULL;
 char *txbuf_b = NULL;
-
-//buffer for reading 16 bit input
-unsigned short *read_buff_r = NULL;//reading buffer
-unsigned short *read_buff_g = NULL;//reading buffer
-unsigned short *read_buff_b = NULL;//reading buffer
 
 //chanel activation
 int red = 0;
@@ -72,7 +67,16 @@ int r16 = 0;
 int g16 = 0;
 int b16 = 0;
 
+//if it's a tbc
+int tbcR = 0;
+int tbcG = 0;
+int tbcB = 0;
+
 int sample_type = 1;// 1 == signed   0 == unsigned
+
+uint32_t sample_cnt_r = 0;//used for tbc processing
+uint32_t sample_cnt_g = 0;//used for tbc processing
+uint32_t sample_cnt_b = 0;//used for tbc processing
 
 void usage(void)
 {
@@ -80,7 +84,7 @@ void usage(void)
 		"fl2k_file2, a sample player for FL2K VGA dongles\n\n"
 		"Usage:\n"
 		"\t[-d device_index (default: 0)]\n"
-		"\t[-s samplerate (default: 100 MS/s)]\n"
+		"\t[-s samplerate (default: 100 MS/s) you can write(ntsc)]\n"
 		"\t[-u Set sample type to unsigned]\n"
 		"\t[-R filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
@@ -88,6 +92,9 @@ void usage(void)
 		"\t[-R16 (convert bits 16 to 8)\n"
 		"\t[-G16 (convert bits 16 to 8)\n"
 		"\t[-B16 (convert bits 16 to 8)\n"
+		"\t[-tbcR interpret R as tbc file\n"
+		"\t[-tbcG interpret G as tbc file\n"
+		"\t[-tbcB interpret B as tbc file\n"
 	);
 	exit(1);
 }
@@ -113,24 +120,65 @@ static void sighandler(int signum)
 }
 #endif
 
-int read16_to8(void *buffer, FILE *stream)
+int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_rate)
 {
 	unsigned char tmp_buf[1310720] ;
 	unsigned short *calc = malloc(2);
 	
-	//unsigned char value = 0;
-	
 	unsigned long i = 0;
+	
+	//(NTSC line = 910 frame = 477750) (PAL line = 1135 frame = 709375)
+	unsigned long frame_lengt = 0;
+	unsigned long line_lengt = 0;
+	
+	int *sample_cnt = NULL;
 	
 	int ret = 2;
 	
+	if(color == 'R')
+	{
+		sample_cnt = &sample_cnt_r;
+	}
+	else if(color == 'G')
+	{
+		sample_cnt = &sample_cnt_g;
+	}
+	else if(color == 'B')
+	{
+		sample_cnt = &sample_cnt_b;
+	}
+	
+	if(sample_rate == 17734475 || sample_rate == 17735845)//PAL
+	{
+		frame_lengt = 709375;
+		line_lengt = 1135;
+	}
+	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC
+	{
+		frame_lengt = 477750;
+		line_lengt = 910;
+	}
+	
+	//buffer used for skip 1 line
+	void *skip = malloc(line_lengt);
+	
 	while(i < 1310720)
 	{
+		//if we are at then end of the frame skip one line
+		if((*sample_cnt == frame_lengt) && (istbc == 1))
+		{
+			//skip 1 line
+			fread(skip,1,line_lengt,stream);
+			fread(skip,1,line_lengt,stream);
+			*sample_cnt = 0;
+		}
+		
 		fread(calc,2,1,stream);
 		
 		tmp_buf[i] = (*calc / 256);//convert to 8 bit
 		
 		i += 1;//on avance le buffer de 1
+		*sample_cnt += 1;
 	}
 	
 	memcpy(buffer, &tmp_buf[0], 1310720);
@@ -141,25 +189,17 @@ int read16_to8(void *buffer, FILE *stream)
 		free(calc);
 	}
 	
+	if(skip)
+	{
+		free(skip);
+	}
+	
 	return ret;
 }
 
 void fl2k_callback(fl2k_data_info_t *data_info)
 {	
 	static uint32_t repeat_cnt = 0;
-	
-	//unsigned to signed
-	unsigned char *usign_r = (void *)txbuf_r;
-	unsigned char *usign_g = (void *)txbuf_g;
-	unsigned char *usign_b = (void *)txbuf_b;
-	
-	//counter 0 - 1310720
-	long buf_size = 0;
-	
-	// store the 8 bit value
-	unsigned char var_r_1 = 0;
-	unsigned char var_g_1 = 0;
-	unsigned char var_b_1 = 0;
 	
 	//store the number of block readed
 	int r;
@@ -196,7 +236,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	{
 		if(r16 == 1)
 		{
-			r = read16_to8(txbuf_r,file_r);
+			r = read16_to8(txbuf_r,file_r,tbcR,'R',samp_rate);
 		}
 		else
 		{
@@ -213,25 +253,11 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	{
 		if(g16 == 1)
 		{
-			// tmp file
-			/*tmp_file = fopen("R:\osmo-fl2k-64bit-20220717\santana_converted.s8", "ab");
-			if (!tmp_file)
-			{
-				fprintf(stderr, "(TMP) : Failed to open %s\n", tmp_file);
-				return -ENOENT;
-			}*/
-			
-			g = read16_to8(txbuf_g,file_g);
-			
-			/*if (tmp_file && (tmp_file != stdin))
-			{
-				fclose(tmp_file);
-			}*/
+			g = read16_to8(txbuf_g,file_g,tbcG,'G',samp_rate);
 		}
 		else
 		{
 			g = fread(txbuf_g, 1, 1310720, file_g);
-			printf("txbuf : %x %x %x %x %x\n",*txbuf_g,(*txbuf_g << 8) + 255,*txbuf_g << 16,*txbuf_g << 24,*txbuf_g << 32);
 		}
 		
 		if (ferror(file_g))
@@ -244,7 +270,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	{
 		if(b16 == 1)
 		{
-			b = read16_to8(txbuf_b,file_b);
+			b = read16_to8(txbuf_b,file_b,tbcB,'B',samp_rate);
 		}
 		else
 		{
@@ -270,7 +296,6 @@ int main(int argc, char **argv)
 	struct sigaction sigact, sigign;
 #endif
 	int r, opt, i;
-	uint32_t samp_rate = 100000000;
 	uint32_t buf_num = 0;
 	int dev_index = 0;
 	void *status;
@@ -285,6 +310,9 @@ int main(int argc, char **argv)
 		{"R16", no_argument, 0, 'x'},
 		{"G16", no_argument, 0, 'y'},
 		{"B16", no_argument, 0, 'z'},
+		{"tbcR", no_argument, 0, 'j'},
+		{"tbcG", no_argument, 0, 'k'},
+		{"tbcB", no_argument, 0, 'l'},
 		{0, 0, 0, 0}
 	};
 
@@ -297,7 +325,18 @@ int main(int argc, char **argv)
 			repeat = (int)atoi(optarg);
 			break;
 		case 's':
-			samp_rate = (uint32_t)atof(optarg);
+			if((strcmp(optarg, "ntsc" ) == 0) || (strcmp(optarg, "NTSC" ) == 0) || (strcmp(optarg, "Ntsc" ) == 0))
+			{
+				samp_rate = (uint32_t) 14318181;
+			}
+			else if((strcmp(optarg, "pal" ) == 0) || (strcmp(optarg, "PAL" ) == 0) || (strcmp(optarg, "Pal" ) == 0))
+			{
+				samp_rate = (uint32_t) 17734475;
+			}
+			else
+			{
+				samp_rate = (uint32_t)atof(optarg);
+			}
 			break;
 		case 'u':
 			sample_type = 0;
@@ -322,6 +361,15 @@ int main(int argc, char **argv)
 			break;
 		case 'z':
 			b16 = 1;
+			break;
+		case 'j':
+			tbcR = 1;
+			break;
+		case 'k':
+			tbcG = 1;
+			break;
+		case 'l':
+			tbcB = 1;
 			break;
 		default:
 			usage();
@@ -361,12 +409,6 @@ if(red == 1)
 		fprintf(stderr, "(RED) : malloc error!\n");
 		goto out;
 	}
-	
-	read_buff_r = malloc(2);
-	if (!read_buff_r) {
-		fprintf(stderr, "(RED 16) : malloc error!\n");
-		goto out;
-	}
 }
 
 //GREEN
@@ -390,12 +432,6 @@ if(green == 1)
 		fprintf(stderr, "(GREEN) : malloc error!\n");
 		goto out;
 	}
-	
-	read_buff_g = malloc(2);
-	if (!read_buff_g) {
-		fprintf(stderr, "(GREEN 16) : malloc error!\n");
-		goto out;
-	}
 }
 //BLUE
 if(blue == 1)
@@ -416,12 +452,6 @@ if(blue == 1)
 	txbuf_b = malloc(FL2K_BUF_LEN);
 	if (!txbuf_b) {
 		fprintf(stderr, "(BLUE) : malloc error!\n");
-		goto out;
-	}
-	
-	read_buff_b = malloc(2);
-	if (!read_buff_b) {
-		fprintf(stderr, "(BLUE 16) : malloc error!\n");
 		goto out;
 	}
 }
@@ -468,11 +498,6 @@ if(red == 1)
 	{
 		free(txbuf_r);
 	}
-	
-	if (read_buff_r)
-	{
-		free(read_buff_r);
-	}
 
 	if (file_r && (file_r != stdin))
 	{
@@ -486,11 +511,6 @@ if(green == 1)
 	{
 		free(txbuf_g);
 	}
-	
-	if (read_buff_g)
-	{
-		free(read_buff_g);
-	}
 
 	if (file_g && (file_g != stdin))
 	{
@@ -503,11 +523,6 @@ if(blue == 1)
 	if (txbuf_b)
 	{
 		free(txbuf_b);
-	}
-	
-	if (read_buff_b)
-	{
-		free(read_buff_b);
 	}
 
 	if (file_b && (file_b != stdin))
