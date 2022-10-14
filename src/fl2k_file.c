@@ -25,6 +25,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -43,18 +44,33 @@ static fl2k_dev_t *dev = NULL;
 
 static volatile int do_exit = 0;
 static volatile int repeat = 1;
-//FILE *file;
+
+//input file
 FILE *file_r;
 FILE *file_g;
 FILE *file_b;
-//char *txbuf = NULL;
+
+FILE *tmp_file;
+
+//buffer for tx
 char *txbuf_r = NULL;
 char *txbuf_g = NULL;
 char *txbuf_b = NULL;
 
+//buffer for reading 16 bit input
+unsigned short *read_buff_r = NULL;//reading buffer
+unsigned short *read_buff_g = NULL;//reading buffer
+unsigned short *read_buff_b = NULL;//reading buffer
+
+//chanel activation
 int red = 0;
 int green = 0;
 int blue = 0;
+
+//enable 16 bit to 8 bit conversion
+int r16 = 0;
+int g16 = 0;
+int b16 = 0;
 
 int sample_type = 1;// 1 == signed   0 == unsigned
 
@@ -64,12 +80,14 @@ void usage(void)
 		"fl2k_file2, a sample player for FL2K VGA dongles\n\n"
 		"Usage:\n"
 		"\t[-d device_index (default: 0)]\n"
-		"\t[-r repeat file (default: 1)]\n"
 		"\t[-s samplerate (default: 100 MS/s)]\n"
 		"\t[-u Set sample type to unsigned]\n"
 		"\t[-R filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
+		"\t[-R16 (convert bits 16 to 8)\n"
+		"\t[-G16 (convert bits 16 to 8)\n"
+		"\t[-B16 (convert bits 16 to 8)\n"
 	);
 	exit(1);
 }
@@ -95,72 +113,154 @@ static void sighandler(int signum)
 }
 #endif
 
-void fl2k_callback(fl2k_data_info_t *data_info)
+int read16_to8(void *buffer, FILE *stream)
 {
-	int r, left = FL2K_BUF_LEN;
+	unsigned char tmp_buf[1310720] ;
+	unsigned short *calc = malloc(2);
+	
+	//unsigned char value = 0;
+	
+	unsigned long i = 0;
+	
+	int ret = 2;
+	
+	while(i < 1310720)
+	{
+		fread(calc,2,1,stream);
+		
+		tmp_buf[i] = (*calc / 256);//convert to 8 bit
+		
+		i += 1;//on avance le buffer de 1
+	}
+	
+	memcpy(buffer, &tmp_buf[0], 1310720);
+	//printf("bufer : %d \n",*buffer);
+	
+	if(calc)
+	{
+		free(calc);
+	}
+	
+	return ret;
+}
+
+void fl2k_callback(fl2k_data_info_t *data_info)
+{	
 	static uint32_t repeat_cnt = 0;
+	
+	//unsigned to signed
+	unsigned char *usign_r = (void *)txbuf_r;
+	unsigned char *usign_g = (void *)txbuf_g;
+	unsigned char *usign_b = (void *)txbuf_b;
+	
+	//counter 0 - 1310720
+	long buf_size = 0;
+	
+	// store the 8 bit value
+	unsigned char var_r_1 = 0;
+	unsigned char var_g_1 = 0;
+	unsigned char var_b_1 = 0;
+	
+	//store the number of block readed
+	int r;
+	int g;
+	int b;
 
 	if (data_info->device_error) {
 		fprintf(stderr, "Device error, exiting.\n");
 		do_exit = 1;
 		return;
 	}
-
+	
+	//set sign (signed = 1 , unsigned = 0)
 	data_info->sampletype_signed = sample_type;
+	
+	//send the bufer with a size of 1310720
 	if(red == 1)
 	{
 		data_info->r_buf = txbuf_r;
 	}
 	if(green == 1)
 	{
+		//printf("Valeur : %d %u %x\n",*txbuf_g,*txbuf_g,*txbuf_g);
 		data_info->g_buf = txbuf_g;
 	}
 	if(blue == 1)
 	{
-		data_info->b_buf = txbuf_b;	
+		data_info->b_buf = txbuf_b;
 	}
 
-	while (!do_exit && (left > 0)) {
+	//read until buffer is full
+	//RED
+	if(red == 1 && !feof(file_r))
+	{
+		if(r16 == 1)
+		{
+			r = read16_to8(txbuf_r,file_r);
+		}
+		else
+		{
+			r = fread(txbuf_r, 1, 1310720, file_r);
+		}
 		
-		if(red == 1)
-		{
-			r = fread(txbuf_r + (FL2K_BUF_LEN - left), 1, left, file_r);
-		}
-		if(green == 1)
-		{
-			r = fread(txbuf_g + (FL2K_BUF_LEN - left), 1, left, file_g);
-		}
-		if(blue == 1)
-		{
-			r = fread(txbuf_b + (FL2K_BUF_LEN - left), 1, left, file_b);	
-		}
-
 		if (ferror(file_r))
+		{
 			fprintf(stderr, "(RED) : File Error\n");
+		}
+	}
+	//GREEN
+	if(green == 1 && !feof(file_g))
+	{
+		if(g16 == 1)
+		{
+			// tmp file
+			/*tmp_file = fopen("R:\osmo-fl2k-64bit-20220717\santana_converted.s8", "ab");
+			if (!tmp_file)
+			{
+				fprintf(stderr, "(TMP) : Failed to open %s\n", tmp_file);
+				return -ENOENT;
+			}*/
+			
+			g = read16_to8(txbuf_g,file_g);
+			
+			/*if (tmp_file && (tmp_file != stdin))
+			{
+				fclose(tmp_file);
+			}*/
+		}
+		else
+		{
+			g = fread(txbuf_g, 1, 1310720, file_g);
+			printf("txbuf : %x %x %x %x %x\n",*txbuf_g,(*txbuf_g << 8) + 255,*txbuf_g << 16,*txbuf_g << 24,*txbuf_g << 32);
+		}
 		
 		if (ferror(file_g))
+		{
 			fprintf(stderr, "(GREEN) : File Error\n");
+		}
+	}
+	//BLUE
+	if(blue == 1 && !feof(file_b))
+	{
+		if(b16 == 1)
+		{
+			b = read16_to8(txbuf_b,file_b);
+		}
+		else
+		{
+			b = fread(txbuf_b, 1, 1310720, file_b);
+		}
 		
 		if (ferror(file_b))
-			fprintf(stderr, "(BLUE) : File Error\n");
-
-		if (feof(file_r) || feof(file_g) || feof(file_b)) {
-			if (repeat && (r > 0)) {
-				repeat_cnt++;
-				fprintf(stderr, "repeat %d\n", repeat_cnt);
-				rewind(file_r);
-				rewind(file_g);
-				rewind(file_b);
-			} else {
-				fl2k_stop_tx(dev);
-				do_exit = 1;
-			}
-		}
-
-		if (r > 0)
 		{
-			left -= r;
+			fprintf(stderr, "(GREEN) : File Error\n");
 		}
+	}
+	
+	if(((r <= 0) && (red == 1)) || ((g <= 0)  && (green == 1))|| ((b <= 0) && (blue == 1)))
+	{
+		fl2k_stop_tx(dev);
+		do_exit = 1;
 	}
 }
 
@@ -174,12 +274,21 @@ int main(int argc, char **argv)
 	uint32_t buf_num = 0;
 	int dev_index = 0;
 	void *status;
-	//char *filename = NULL;
+
+	//file adress
 	char *filename_r = NULL;
 	char *filename_g = NULL;
 	char *filename_b = NULL;
+	
+	int option_index = 0;
+	static struct option long_options[] = {
+		{"R16", no_argument, 0, 'x'},
+		{"G16", no_argument, 0, 'y'},
+		{"B16", no_argument, 0, 'z'},
+		{0, 0, 0, 0}
+	};
 
-	while ((opt = getopt(argc, argv, "d:r:s:uR:G:B:")) != -1) {
+	while ((opt = getopt_long_only(argc, argv, "d:r:s:uR:G:B:",long_options, &option_index)) != -1) {
 		switch (opt) {
 		case 'd':
 			dev_index = (uint32_t)atoi(optarg);
@@ -205,19 +314,25 @@ int main(int argc, char **argv)
 			blue = 1;
 			filename_b = optarg;
 			break;
+		case 'x':
+			r16 = 1;
+			break;
+		case 'y':
+			g16 = 1;
+			break;
+		case 'z':
+			b16 = 1;
+			break;
 		default:
 			usage();
 			break;
 		}
 	}
 
-	/*if (argc <= optind)
-		usage();
-	else
-		filename = argv[optind];*/
-
 	if (dev_index < 0)
+	{
 		exit(1);
+	}
 
 	if (red == 0 && green == 0 && blue == 0)
 	{
@@ -246,6 +361,12 @@ if(red == 1)
 		fprintf(stderr, "(RED) : malloc error!\n");
 		goto out;
 	}
+	
+	read_buff_r = malloc(2);
+	if (!read_buff_r) {
+		fprintf(stderr, "(RED 16) : malloc error!\n");
+		goto out;
+	}
 }
 
 //GREEN
@@ -267,6 +388,12 @@ if(green == 1)
 	txbuf_g = malloc(FL2K_BUF_LEN);
 	if (!txbuf_g) {
 		fprintf(stderr, "(GREEN) : malloc error!\n");
+		goto out;
+	}
+	
+	read_buff_g = malloc(2);
+	if (!read_buff_g) {
+		fprintf(stderr, "(GREEN 16) : malloc error!\n");
 		goto out;
 	}
 }
@@ -291,7 +418,14 @@ if(blue == 1)
 		fprintf(stderr, "(BLUE) : malloc error!\n");
 		goto out;
 	}
+	
+	read_buff_b = malloc(2);
+	if (!read_buff_b) {
+		fprintf(stderr, "(BLUE 16) : malloc error!\n");
+		goto out;
+	}
 }
+
 //next
 
 	fl2k_open(&dev, (uint32_t)dev_index);
@@ -328,23 +462,59 @@ if(blue == 1)
 
 out:
 //RED
+if(red == 1)
+{
 	if (txbuf_r)
+	{
 		free(txbuf_r);
+	}
+	
+	if (read_buff_r)
+	{
+		free(read_buff_r);
+	}
 
 	if (file_r && (file_r != stdin))
+	{
 		fclose(file_r);
+	}
+}
 //GREEN
+if(green == 1)
+{
 	if (txbuf_g)
-	free(txbuf_g);
+	{
+		free(txbuf_g);
+	}
+	
+	if (read_buff_g)
+	{
+		free(read_buff_g);
+	}
 
 	if (file_g && (file_g != stdin))
+	{
 		fclose(file_g);
+	}
+}
 //BLUE	
+if(blue == 1)
+{
 	if (txbuf_b)
-	free(txbuf_b);
+	{
+		free(txbuf_b);
+	}
+	
+	if (read_buff_b)
+	{
+		free(read_buff_b);
+	}
 
 	if (file_b && (file_b != stdin))
+	{
 		fclose(file_b);
+	}
+}
 
 	return 0;
 }
