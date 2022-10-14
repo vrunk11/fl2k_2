@@ -43,18 +43,33 @@ static fl2k_dev_t *dev = NULL;
 
 static volatile int do_exit = 0;
 static volatile int repeat = 1;
-FILE *file;
-char *txbuf = NULL;
+//FILE *file;
+FILE *file_r;
+FILE *file_g;
+FILE *file_b;
+//char *txbuf = NULL;
+char *txbuf_r = NULL;
+char *txbuf_g = NULL;
+char *txbuf_b = NULL;
+
+int red = 0;
+int green = 0;
+int blue = 0;
+
+int sample_type = 1;// 1 == signed   0 == unsigned
 
 void usage(void)
 {
 	fprintf(stderr,
-		"fl2k_file, a sample player for FL2K VGA dongles\n\n"
+		"fl2k_file2, a sample player for FL2K VGA dongles\n\n"
 		"Usage:\n"
 		"\t[-d device_index (default: 0)]\n"
 		"\t[-r repeat file (default: 1)]\n"
 		"\t[-s samplerate (default: 100 MS/s)]\n"
-		"\tfilename (use '-' to read from stdin)\n\n"
+		"\t[-u Set sample type to unsigned]\n"
+		"\t[-R filename (use '-' to read from stdin)\n"
+		"\t[-G filename (use '-' to read from stdin)\n"
+		"\t[-G filename (use '-' to read from stdin)\n"
 	);
 	exit(1);
 }
@@ -91,20 +106,51 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		return;
 	}
 
-	data_info->sampletype_signed = 1;
-	data_info->r_buf = txbuf;
+	data_info->sampletype_signed = sample_type;
+	if(red == 1)
+	{
+		data_info->r_buf = txbuf_r;
+	}
+	if(green == 1)
+	{
+		data_info->g_buf = txbuf_g;
+	}
+	if(blue == 1)
+	{
+		data_info->b_buf = txbuf_b;	
+	}
 
 	while (!do_exit && (left > 0)) {
-		r = fread(txbuf + (FL2K_BUF_LEN - left), 1, left, file);
+		
+		if(red == 1)
+		{
+			r = fread(txbuf_r + (FL2K_BUF_LEN - left), 1, left, file_r);
+		}
+		if(green == 1)
+		{
+			r = fread(txbuf_g + (FL2K_BUF_LEN - left), 1, left, file_g);
+		}
+		if(blue == 1)
+		{
+			r = fread(txbuf_b + (FL2K_BUF_LEN - left), 1, left, file_b);	
+		}
 
-		if (ferror(file))
-			fprintf(stderr, "File Error\n");
+		if (ferror(file_r))
+			fprintf(stderr, "(RED) : File Error\n");
+		
+		if (ferror(file_g))
+			fprintf(stderr, "(GREEN) : File Error\n");
+		
+		if (ferror(file_b))
+			fprintf(stderr, "(BLUE) : File Error\n");
 
-		if (feof(file)) {
+		if (feof(file_r) || feof(file_g) || feof(file_b)) {
 			if (repeat && (r > 0)) {
 				repeat_cnt++;
 				fprintf(stderr, "repeat %d\n", repeat_cnt);
-				rewind(file);
+				rewind(file_r);
+				rewind(file_g);
+				rewind(file_b);
 			} else {
 				fl2k_stop_tx(dev);
 				do_exit = 1;
@@ -112,7 +158,9 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		}
 
 		if (r > 0)
+		{
 			left -= r;
+		}
 	}
 }
 
@@ -126,9 +174,12 @@ int main(int argc, char **argv)
 	uint32_t buf_num = 0;
 	int dev_index = 0;
 	void *status;
-	char *filename = NULL;
+	//char *filename = NULL;
+	char *filename_r = NULL;
+	char *filename_g = NULL;
+	char *filename_b = NULL;
 
-	while ((opt = getopt(argc, argv, "d:r:s:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:r:s:uR:G:B:")) != -1) {
 		switch (opt) {
 		case 'd':
 			dev_index = (uint32_t)atoi(optarg);
@@ -139,38 +190,109 @@ int main(int argc, char **argv)
 		case 's':
 			samp_rate = (uint32_t)atof(optarg);
 			break;
+		case 'u':
+			sample_type = 0;
+			break;
+		case 'R':
+			red = 1;
+			filename_r = optarg;
+			break;
+		case 'G':
+			green = 1;
+			filename_g = optarg;
+			break;
+		case 'B':
+			blue = 1;
+			filename_b = optarg;
+			break;
 		default:
 			usage();
 			break;
 		}
 	}
 
-	if (argc <= optind)
+	/*if (argc <= optind)
 		usage();
 	else
-		filename = argv[optind];
+		filename = argv[optind];*/
 
 	if (dev_index < 0)
 		exit(1);
 
-	if (strcmp(filename, "-") == 0) { /* Read samples from stdin */
-		file = stdin;
+	if (red == 0 && green == 0 && blue == 0)
+	{
+		fprintf(stderr, "\nNo file provided using option (-R,-G,-B)\n\n");
+		usage();
+	}
+	
+//RED
+if(red == 1)
+{
+	if (strcmp(filename_r, "-") == 0) { /* Read samples from stdin */
+		file_r = stdin;
 #ifdef _WIN32
 		_setmode(_fileno(stdin), _O_BINARY);
 #endif
 	} else {
-		file = fopen(filename, "rb");
-		if (!file) {
-			fprintf(stderr, "Failed to open %s\n", filename);
+		file_r = fopen(filename_r, "rb");
+		if (!file_r) {
+			fprintf(stderr, "(RED) : Failed to open %s\n", filename_r);
 			return -ENOENT;
 		}
 	}
 
-	txbuf = malloc(FL2K_BUF_LEN);
-	if (!txbuf) {
-		fprintf(stderr, "malloc error!\n");
+	txbuf_r = malloc(FL2K_BUF_LEN);
+	if (!txbuf_r) {
+		fprintf(stderr, "(RED) : malloc error!\n");
 		goto out;
 	}
+}
+
+//GREEN
+if(green == 1)
+{
+	if (strcmp(filename_g, "-") == 0) { /* Read samples from stdin */
+		file_g = stdin;
+#ifdef _WIN32
+		_setmode(_fileno(stdin), _O_BINARY);
+#endif
+	} else {
+		file_g = fopen(filename_g, "rb");
+		if (!file_g) {
+			fprintf(stderr, "(GREEN) : Failed to open %s\n", filename_g);
+			return -ENOENT;
+		}
+	}
+
+	txbuf_g = malloc(FL2K_BUF_LEN);
+	if (!txbuf_g) {
+		fprintf(stderr, "(GREEN) : malloc error!\n");
+		goto out;
+	}
+}
+//BLUE
+if(blue == 1)
+{
+	if (strcmp(filename_b, "-") == 0) { /* Read samples from stdin */
+		file_b = stdin;
+#ifdef _WIN32
+		_setmode(_fileno(stdin), _O_BINARY);
+#endif
+	} else {
+		file_b = fopen(filename_b, "rb");
+		if (!file_b) {
+			fprintf(stderr, "(BLUE) : Failed to open %s\n", filename_b);
+			return -ENOENT;
+		}
+	}
+
+	txbuf_b = malloc(FL2K_BUF_LEN);
+	if (!txbuf_b) {
+		fprintf(stderr, "(BLUE) : malloc error!\n");
+		goto out;
+	}
+}
+//next
 
 	fl2k_open(&dev, (uint32_t)dev_index);
 	if (NULL == dev) {
@@ -205,11 +327,24 @@ int main(int argc, char **argv)
 	fl2k_close(dev);
 
 out:
-	if (txbuf)
-		free(txbuf);
+//RED
+	if (txbuf_r)
+		free(txbuf_r);
 
-	if (file && (file != stdin))
-		fclose(file);
+	if (file_r && (file_r != stdin))
+		fclose(file_r);
+//GREEN
+	if (txbuf_g)
+	free(txbuf_g);
+
+	if (file_g && (file_g != stdin))
+		fclose(file_g);
+//BLUE	
+	if (txbuf_b)
+	free(txbuf_b);
+
+	if (file_b && (file_b != stdin))
+		fclose(file_b);
 
 	return 0;
 }
