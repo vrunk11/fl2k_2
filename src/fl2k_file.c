@@ -26,6 +26,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <pthread.h>
+#include <getopt.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -34,7 +36,6 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
-#include "getopt/getopt.h"
 #define sleep_ms(ms)	Sleep(ms)
 #endif
 
@@ -78,13 +79,28 @@ uint32_t sample_cnt_r = 0;//used for tbc processing
 uint32_t sample_cnt_g = 0;//used for tbc processing
 uint32_t sample_cnt_b = 0;//used for tbc processing
 
+//thread for processing
+pthread_t thread_r;
+pthread_t thread_g;
+pthread_t thread_b;
+
+//int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_rate)
+/*struct read16_to8_args{
+	void *buffer;
+	FILE *stream;
+	int istbc;
+	char color;
+	uint32_t sample_rate;
+	int *ret;
+};*/
+
 void usage(void)
 {
 	fprintf(stderr,
 		"fl2k_file2, a sample player for FL2K VGA dongles\n\n"
 		"Usage:\n"
 		"\t[-d device_index (default: 0)]\n"
-		"\t[-s samplerate (default: 100 MS/s) you can write(ntsc)]\n"
+		"\t[-s samplerate (default: 100 MS/s) you can write(ntsc) or (pal)]\n"
 		"\t[-u Set sample type to unsigned]\n"
 		"\t[-R filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
@@ -120,8 +136,15 @@ static void sighandler(int signum)
 }
 #endif
 
-int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_rate)
+//int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_rate)
+void *read16_to8(void *inpt_color)
 {
+	void *buffer = NULL;
+	FILE *stream = NULL;
+	int istbc = 0;
+	char color = (char *) inpt_color;
+	uint32_t sample_rate = samp_rate;
+	
 	unsigned char tmp_buf[1310720] ;
 	unsigned short *calc = malloc(2);
 	
@@ -133,18 +156,25 @@ int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_r
 	
 	int *sample_cnt = NULL;
 	
-	int ret = 2;
-	
 	if(color == 'R')
 	{
+		buffer = txbuf_r;
+		stream = file_r;
+		istbc = tbcR;
 		sample_cnt = &sample_cnt_r;
 	}
 	else if(color == 'G')
 	{
+		buffer = txbuf_g;
+		stream = file_g;
+		istbc = tbcG;
 		sample_cnt = &sample_cnt_g;
 	}
 	else if(color == 'B')
 	{
+		buffer = txbuf_b;
+		stream = file_b;
+		istbc = tbcB;
 		sample_cnt = &sample_cnt_b;
 	}
 	
@@ -162,7 +192,7 @@ int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_r
 	//buffer used for skip 1 line
 	void *skip = malloc(line_lengt);
 	
-	while(i < 1310720)
+	while(i < 1310720 && !do_exit)
 	{
 		//if we are at then end of the frame skip one line
 		if((*sample_cnt == frame_lengt) && (istbc == 1))
@@ -175,7 +205,7 @@ int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_r
 		
 		fread(calc,2,1,stream);
 		
-		tmp_buf[i] = (*calc / 256);//convert to 8 bit
+		tmp_buf[i] = round(*calc / 256);//convert to 8 bit
 		
 		i += 1;//on avance le buffer de 1
 		*sample_cnt += 1;
@@ -193,8 +223,18 @@ int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_r
 	{
 		free(skip);
 	}
-	
-	return ret;
+	if(color == 'R')
+	{
+		pthread_exit(thread_r);
+	}
+	else if(color == 'G')
+	{
+		pthread_exit("test");
+	}
+	else if(color == 'B')
+	{
+		pthread_exit(thread_b);
+	}
 }
 
 void fl2k_callback(fl2k_data_info_t *data_info)
@@ -205,6 +245,10 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	int r;
 	int g;
 	int b;
+	
+	/*struct read16_to8_args r_args = {txbuf_r,file_r,tbcR,'R',samp_rate} ;
+	struct read16_to8_args g_args = {txbuf_g,file_g,tbcG,'G',samp_rate} ;
+	struct read16_to8_args b_args = {txbuf_b,file_b,tbcB,'B',samp_rate} ;*/
 
 	if (data_info->device_error) {
 		fprintf(stderr, "Device error, exiting.\n");
@@ -236,58 +280,74 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	{
 		if(r16 == 1)
 		{
-			r = read16_to8(txbuf_r,file_r,tbcR,'R',samp_rate);
+			pthread_create(&thread_r,NULL,read16_to8,'R');
+			//r = read16_to8(txbuf_r,file_r,tbcR,'R',samp_rate);
 		}
 		else
 		{
-			r = fread(txbuf_r, 1, 1310720, file_r);
+			fread(txbuf_r, 1, 1310720, file_r);
 		}
 		
 		if (ferror(file_r))
 		{
 			fprintf(stderr, "(RED) : File Error\n");
 		}
+		pthread_join(thread_r,NULL);
+	}
+	else if(red == 1 && feof(file_r))
+	{
+		fprintf(stderr, "(RED) : Nothing more to read\n");
 	}
 	//GREEN
 	if(green == 1 && !feof(file_g))
 	{
 		if(g16 == 1)
 		{
-			g = read16_to8(txbuf_g,file_g,tbcG,'G',samp_rate);
+			pthread_create(&thread_g,NULL,read16_to8,'G');
 		}
 		else
 		{
-			g = fread(txbuf_g, 1, 1310720, file_g);
+			fread(txbuf_g, 1, 1310720, file_g);
 		}
 		
 		if (ferror(file_g))
 		{
 			fprintf(stderr, "(GREEN) : File Error\n");
 		}
+		pthread_join(thread_g,NULL);
+	}
+	else if(green == 1 && feof(file_g))
+	{
+		fprintf(stderr, "(GREEN) : Nothing more to read\n");
 	}
 	//BLUE
 	if(blue == 1 && !feof(file_b))
 	{
 		if(b16 == 1)
 		{
-			b = read16_to8(txbuf_b,file_b,tbcB,'B',samp_rate);
+			pthread_create(&thread_b,NULL,read16_to8,'B');
 		}
 		else
 		{
-			b = fread(txbuf_b, 1, 1310720, file_b);
+			fread(txbuf_b, 1, 1310720, file_b);
 		}
 		
 		if (ferror(file_b))
 		{
 			fprintf(stderr, "(GREEN) : File Error\n");
 		}
+		pthread_join(thread_b,NULL);
+	}
+	else if(blue == 1 && feof(file_b))
+	{
+		fprintf(stderr, "(BLUE) : Nothing more to read\n");
 	}
 	
-	if(((r <= 0) && (red == 1)) || ((g <= 0)  && (green == 1))|| ((b <= 0) && (blue == 1)))
+	/*if(((r <= 0) && (red == 1)) || ((g <= 0)  && (green == 1))|| ((b <= 0) && (blue == 1)))
 	{
 		fl2k_stop_tx(dev);
 		do_exit = 1;
-	}
+	}*/
 }
 
 int main(int argc, char **argv)
@@ -307,12 +367,12 @@ int main(int argc, char **argv)
 	
 	int option_index = 0;
 	static struct option long_options[] = {
-		{"R16", no_argument, 0, 'x'},
-		{"G16", no_argument, 0, 'y'},
-		{"B16", no_argument, 0, 'z'},
-		{"tbcR", no_argument, 0, 'j'},
-		{"tbcG", no_argument, 0, 'k'},
-		{"tbcB", no_argument, 0, 'l'},
+		{"R16", 0, 0, 'x'},
+		{"G16", 0, 0, 'y'},
+		{"B16", 0, 0, 'z'},
+		{"tbcR", 0, 0, 'j'},
+		{"tbcG", 0, 0, 'k'},
+		{"tbcB", 0, 0, 'l'},
 		{0, 0, 0, 0}
 	};
 
