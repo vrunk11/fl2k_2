@@ -73,6 +73,9 @@ int tbcR = 0;
 int tbcG = 0;
 int tbcB = 0;
 
+//
+int read_mode = 0;//0 = multitthreading / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)
+
 int sample_type = 1;// 1 == signed   0 == unsigned
 
 uint32_t sample_cnt_r = 0;//used for tbc processing
@@ -83,16 +86,6 @@ uint32_t sample_cnt_b = 0;//used for tbc processing
 pthread_t thread_r;
 pthread_t thread_g;
 pthread_t thread_b;
-
-//int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_rate)
-/*struct read16_to8_args{
-	void *buffer;
-	FILE *stream;
-	int istbc;
-	char color;
-	uint32_t sample_rate;
-	int *ret;
-};*/
 
 void usage(void)
 {
@@ -111,6 +104,7 @@ void usage(void)
 		"\t[-tbcR interpret R as tbc file\n"
 		"\t[-tbcG interpret G as tbc file\n"
 		"\t[-tbcB interpret B as tbc file\n"
+		"\t[-readMode (default = 0) option : 0 = multit-threading (RGB) / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)\n"
 	);
 	exit(1);
 }
@@ -136,8 +130,34 @@ static void sighandler(int signum)
 }
 #endif
 
-//int read16_to8(void *buffer, FILE *stream,int istbc,char color,uint32_t sample_rate)
-void *read16_to8(void *inpt_color)
+//compute number of sample to skip
+unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long bufsize)
+{
+	int nb_skip = 0;
+	
+	//on enlève ce qui reste avant le skip
+	bufsize -= (frame_lengt - sample_cnt);
+	nb_skip = 1;
+	
+	while(bufsize > 0)
+	{
+		bufsize -= frame_lengt;
+		
+		//if we can do a complet skip
+		if((bufsize - linelength) > 0)
+		{
+			nb_skip ++;
+		}
+		//if we stop in the middle of a skip
+		else if(((bufsize - linelength) < 0) && bufsize > 0)
+		{
+			nb_skip ++;
+		}
+	}
+	return (nb_skip * linelength);//multiply for giving the number of byte to skip
+}
+
+int *read_sample_file(void *inpt_color)
 {
 	void *buffer = NULL;
 	FILE *stream = NULL;
@@ -145,16 +165,17 @@ void *read16_to8(void *inpt_color)
 	char color = (char *) inpt_color;
 	uint32_t sample_rate = samp_rate;
 	
-	unsigned char tmp_buf[1310720] ;
-	unsigned short *calc = malloc(2);
+	int is16 = 0;
 	
-	unsigned long i = 0;
+	long i = 0;//counter for tmp_buf
+	long y = 0;//counter for calc
 	
 	//(NTSC line = 910 frame = 477750) (PAL line = 1135 frame = 709375)
 	unsigned long frame_lengt = 0;
 	unsigned long line_lengt = 0;
+	unsigned long sample_skip = 0;
 	
-	int *sample_cnt = NULL;
+	uint32_t *sample_cnt = NULL;
 	
 	if(color == 'R')
 	{
@@ -162,6 +183,10 @@ void *read16_to8(void *inpt_color)
 		stream = file_r;
 		istbc = tbcR;
 		sample_cnt = &sample_cnt_r;
+		if(r16 == 1)
+		{
+			is16 = 1;
+		}
 	}
 	else if(color == 'G')
 	{
@@ -169,6 +194,10 @@ void *read16_to8(void *inpt_color)
 		stream = file_g;
 		istbc = tbcG;
 		sample_cnt = &sample_cnt_g;
+		if(g16 == 1)
+		{
+			is16 = 1;
+		}
 	}
 	else if(color == 'B')
 	{
@@ -176,65 +205,101 @@ void *read16_to8(void *inpt_color)
 		stream = file_b;
 		istbc = tbcB;
 		sample_cnt = &sample_cnt_b;
+		if(b16 == 1)
+		{
+			is16 = 1;
+		}
 	}
 	
-	if(sample_rate == 17734475 || sample_rate == 17735845)//PAL
+	if(sample_rate == 17734475 || sample_rate == 17735845)//PAL multiplied by 2 if input is 16bit
 	{
-		frame_lengt = 709375;
-		line_lengt = 1135;
+		frame_lengt = 709375 + (709375 * is16);
+		line_lengt = 1135 + (1135 * is16);
 	}
-	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC
+	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC multiplied by 2 if input is 16bit
 	{
-		frame_lengt = 477750;
-		line_lengt = 910;
+		frame_lengt = 477750 + (477750 * is16);
+		line_lengt = 910 + (910 * is16);
 	}
 	
-	//buffer used for skip 1 line
-	void *skip = malloc(line_lengt);
+	unsigned long buf_size = (1310720 + (is16 * 1310720));
 	
-	while(i < 1310720 && !do_exit)
+	if(istbc == 1)
+	{
+		sample_skip = calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
+	}
+	
+	buf_size += sample_skip;
+	
+	unsigned char *tmp_buf = malloc(1310720);
+	unsigned char *calc = malloc(buf_size);
+	
+	if (tmp_buf == NULL || calc == NULL)
+	{
+		free(tmp_buf);   // Free both in case only one was allocated
+		free(calc);
+		fprintf(stderr, "(%c) malloc error (tmp_buf , calc)\n",color);
+		return -1;
+	}
+	
+	if(istbc == 1)
+	{
+		sample_skip = calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
+	}
+	
+	if(fread(calc,buf_size,1,stream) != 1)
+	{
+		free(tmp_buf);   // Free both in case only one was allocated
+		free(calc);
+		fprintf(stderr, "(%c) fread error %d : ",color,errno);
+		perror(NULL);
+		return -1;
+	}
+	
+	while((y < buf_size) && !do_exit)
 	{
 		//if we are at then end of the frame skip one line
 		if((*sample_cnt == frame_lengt) && (istbc == 1))
 		{
 			//skip 1 line
-			fread(skip,1,line_lengt,stream);
-			fread(skip,1,line_lengt,stream);
+			y += line_lengt;
 			*sample_cnt = 0;
 		}
 		
-		fread(calc,2,1,stream);
+		if(is16 == 1)
+		{
+			tmp_buf[i] = round(((calc[y+1] * 256) + calc[y])/ 256.0);//convert to 8 bit
+			y += 2;
+		}
+		else
+		{
+			tmp_buf[i] = calc[y];
+			y += 1;
+		}
 		
-		tmp_buf[i] = round(*calc / 256);//convert to 8 bit
+		i += 1;//on avance tmp_buff de 1
 		
-		i += 1;//on avance le buffer de 1
-		*sample_cnt += 1;
+		*sample_cnt += (1 + is16);
 	}
 	
-	memcpy(buffer, &tmp_buf[0], 1310720);
-	//printf("bufer : %d \n",*buffer);
+	memcpy(buffer, tmp_buf, 1310720);
 	
-	if(calc)
-	{
-		free(calc);
-	}
+	free(tmp_buf);
+	free(calc);
 	
-	if(skip)
-	{
-		free(skip);
-	}
 	if(color == 'R')
 	{
 		pthread_exit(thread_r);
 	}
 	else if(color == 'G')
 	{
-		pthread_exit("test");
+		pthread_exit(thread_g);
 	}
 	else if(color == 'B')
 	{
 		pthread_exit(thread_b);
 	}
+	return 0;
 }
 
 void fl2k_callback(fl2k_data_info_t *data_info)
@@ -245,10 +310,6 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	int r;
 	int g;
 	int b;
-	
-	/*struct read16_to8_args r_args = {txbuf_r,file_r,tbcR,'R',samp_rate} ;
-	struct read16_to8_args g_args = {txbuf_g,file_g,tbcG,'G',samp_rate} ;
-	struct read16_to8_args b_args = {txbuf_b,file_b,tbcB,'B',samp_rate} ;*/
 
 	if (data_info->device_error) {
 		fprintf(stderr, "Device error, exiting.\n");
@@ -278,69 +339,110 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	//RED
 	if(red == 1 && !feof(file_r))
 	{
-		if(r16 == 1)
-		{
-			pthread_create(&thread_r,NULL,read16_to8,'R');
-			//r = read16_to8(txbuf_r,file_r,tbcR,'R',samp_rate);
-		}
-		else
-		{
-			fread(txbuf_r, 1, 1310720, file_r);
-		}
+		pthread_create(&thread_r,NULL,read_sample_file,'R');
 		
 		if (ferror(file_r))
 		{
 			fprintf(stderr, "(RED) : File Error\n");
 		}
-		pthread_join(thread_r,NULL);
 	}
 	else if(red == 1 && feof(file_r))
 	{
 		fprintf(stderr, "(RED) : Nothing more to read\n");
 	}
+	
+	//thread sync R
+	if(read_mode == 3 || read_mode == 1)
+	{
+		if(red == 1)
+		{
+			pthread_join(thread_r,NULL);
+		}
+	}
+	
 	//GREEN
 	if(green == 1 && !feof(file_g))
 	{
-		if(g16 == 1)
-		{
-			pthread_create(&thread_g,NULL,read16_to8,'G');
-		}
-		else
-		{
-			fread(txbuf_g, 1, 1310720, file_g);
-		}
+		pthread_create(&thread_g,NULL,read_sample_file,'G');
 		
 		if (ferror(file_g))
 		{
 			fprintf(stderr, "(GREEN) : File Error\n");
 		}
-		pthread_join(thread_g,NULL);
 	}
 	else if(green == 1 && feof(file_g))
 	{
 		fprintf(stderr, "(GREEN) : Nothing more to read\n");
 	}
+	
+	//thread sync G
+	if(read_mode == 3)
+	{
+		if(green == 1)
+		{
+			pthread_join(thread_g,NULL);
+		}
+	}
+	else if(read_mode == 2)
+	{
+		if(red == 1)
+		{
+			pthread_join(thread_r,NULL);
+		}
+		if(green == 1)
+		{
+			pthread_join(thread_g,NULL);
+		}
+	}
+	
 	//BLUE
 	if(blue == 1 && !feof(file_b))
 	{
-		if(b16 == 1)
-		{
-			pthread_create(&thread_b,NULL,read16_to8,'B');
-		}
-		else
-		{
-			fread(txbuf_b, 1, 1310720, file_b);
-		}
+		pthread_create(&thread_b,NULL,read_sample_file,'B');
 		
-		if (ferror(file_b))
+		if(ferror(file_b))
 		{
-			fprintf(stderr, "(GREEN) : File Error\n");
+			fprintf(stderr, "(BLUE) : File Error\n");
 		}
-		pthread_join(thread_b,NULL);
 	}
 	else if(blue == 1 && feof(file_b))
 	{
 		fprintf(stderr, "(BLUE) : Nothing more to read\n");
+	}
+	
+	//thread sync B
+	if(read_mode == 0)
+	{
+		if(red == 1)
+		{
+			pthread_join(thread_r,NULL);
+		}
+		if(green == 1)
+		{
+			pthread_join(thread_g,NULL);
+		}
+		if(blue == 1)
+		{
+			pthread_join(thread_b,NULL);
+		}
+	}
+	else if(read_mode == 3 || read_mode == 2)
+	{
+		if(blue == 1)
+		{
+			pthread_join(thread_b,NULL);
+		}
+	}
+	else if(read_mode == 1)
+	{
+		if(green == 1)
+		{
+			pthread_join(thread_g,NULL);
+		}
+		if(blue == 1)
+		{
+			pthread_join(thread_b,NULL);
+		}
 	}
 	
 	/*if(((r <= 0) && (red == 1)) || ((g <= 0)  && (green == 1))|| ((b <= 0) && (blue == 1)))
@@ -373,6 +475,7 @@ int main(int argc, char **argv)
 		{"tbcR", 0, 0, 'j'},
 		{"tbcG", 0, 0, 'k'},
 		{"tbcB", 0, 0, 'l'},
+		{"readMode", 1, 0, 'm'},
 		{0, 0, 0, 0}
 	};
 
@@ -431,6 +534,9 @@ int main(int argc, char **argv)
 		case 'l':
 			tbcB = 1;
 			break;
+		case 'm':
+			read_mode = (int)atoi(optarg);
+			break;
 		default:
 			usage();
 			break;
@@ -439,10 +545,17 @@ int main(int argc, char **argv)
 
 	if (dev_index < 0)
 	{
-		exit(1);
+		fprintf(stderr, "\nDevice number invalid\n\n");
+		usage();
+	}
+	
+	if(read_mode < 0 || read_mode > 3)
+	{
+		fprintf(stderr, "\nRead mode unknown\n\n");
+		usage();
 	}
 
-	if (red == 0 && green == 0 && blue == 0)
+	if(red == 0 && green == 0 && blue == 0)
 	{
 		fprintf(stderr, "\nNo file provided using option (-R,-G,-B)\n\n");
 		usage();
