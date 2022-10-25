@@ -73,6 +73,16 @@ int tbcR = 0;
 int tbcG = 0;
 int tbcB = 0;
 
+//ire levels change
+double ire_r = 0;
+double ire_g = 0;
+double ire_b = 0;
+
+//chroma gain
+double c_gain_r = 1;
+double c_gain_g = 1;
+double c_gain_b = 1;
+
 //
 int read_mode = 0;//0 = multitthreading / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)
 
@@ -81,6 +91,18 @@ int sample_type = 1;// 1 == signed   0 == unsigned
 uint32_t sample_cnt_r = 0;//used for tbc processing
 uint32_t sample_cnt_g = 0;//used for tbc processing
 uint32_t sample_cnt_b = 0;//used for tbc processing
+
+uint32_t line_cnt_r = 0;//used for tbc processing
+uint32_t line_cnt_g = 0;//used for tbc processing
+uint32_t line_cnt_b = 0;//used for tbc processing
+
+uint32_t line_sample_cnt_r = 0;//used for tbc processing
+uint32_t line_sample_cnt_g = 0;//used for tbc processing
+uint32_t line_sample_cnt_b = 0;//used for tbc processing
+
+uint32_t field_cnt_r = 0;//used for tbc processing
+uint32_t field_cnt_g = 0;//used for tbc processing
+uint32_t field_cnt_b = 0;//used for tbc processing
 
 //thread for processing
 pthread_t thread_r;
@@ -97,13 +119,19 @@ void usage(void)
 		"\t[-u Set sample type to unsigned]\n"
 		"\t[-R filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
-		"\t[-G filename (use '-' to read from stdin)\n"
+		"\t[-B filename (use '-' to read from stdin)\n"
 		"\t[-R16 (convert bits 16 to 8)\n"
 		"\t[-G16 (convert bits 16 to 8)\n"
 		"\t[-B16 (convert bits 16 to 8)\n"
 		"\t[-tbcR interpret R as tbc file\n"
 		"\t[-tbcG interpret G as tbc file\n"
 		"\t[-tbcB interpret B as tbc file\n"
+		"\t[-CgainR chroma gain for input R (0.0 to 6.0) (using color burst)\n"
+		"\t[-CgainG chroma gain for input G (0.0 to 6.0) (using color burst)\n"
+		"\t[-CgainB chroma gain for input B (0.0 to 6.0) (using color burst)\n"
+		"\t[-ireR IRE level for input R (-50.0 to +50.0)\n"
+		"\t[-ireG IRE level for input G (-50.0 to +50.0)\n"
+		"\t[-ireB IRE level for input B (-50.0 to +50.0)\n"
 		"\t[-readMode (default = 0) option : 0 = multit-threading (RGB) / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)\n"
 	);
 	exit(1);
@@ -159,11 +187,14 @@ unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long 
 
 int *read_sample_file(void *inpt_color)
 {
+	//parametter
 	void *buffer = NULL;
 	FILE *stream = NULL;
 	int istbc = 0;
 	char color = (char *) inpt_color;
 	uint32_t sample_rate = samp_rate;
+	double *chroma_gain = NULL;
+	double *ire_level = NULL;
 	
 	int is16 = 0;
 	
@@ -172,10 +203,25 @@ int *read_sample_file(void *inpt_color)
 	
 	//(NTSC line = 910 frame = 477750) (PAL line = 1135 frame = 709375)
 	unsigned long frame_lengt = 0;
+	unsigned long frame_nb_line = 0;
+	unsigned int v_start =0;
+	unsigned int v_end =0;
 	unsigned long line_lengt = 0;
 	unsigned long sample_skip = 0;
 	
+	//COLOR BURST
+	unsigned int cbust_sample = 0;
+	unsigned int cbust_middle = 0;
+	double cbust_count = 0;
+	double cbust_offset = 0;
+	unsigned int cbust_start = 0;
+	unsigned int cbust_end = 0;
+	
+	//count
 	uint32_t *sample_cnt = NULL;
+	uint32_t *line_cnt = NULL;
+	uint32_t *line_sample_cnt = NULL;
+	uint32_t *field_cnt = NULL;
 	
 	if(color == 'R')
 	{
@@ -183,6 +229,11 @@ int *read_sample_file(void *inpt_color)
 		stream = file_r;
 		istbc = tbcR;
 		sample_cnt = &sample_cnt_r;
+		line_cnt = &line_cnt_r;
+		line_sample_cnt = &line_sample_cnt_r;
+		field_cnt = & field_cnt_r;
+		chroma_gain = &c_gain_r;
+		ire_level = &ire_r;
 		if(r16 == 1)
 		{
 			is16 = 1;
@@ -194,6 +245,11 @@ int *read_sample_file(void *inpt_color)
 		stream = file_g;
 		istbc = tbcG;
 		sample_cnt = &sample_cnt_g;
+		line_cnt = &line_cnt_g;
+		line_sample_cnt = &line_sample_cnt_g;
+		field_cnt = & field_cnt_g;
+		chroma_gain = &c_gain_g;
+		ire_level = &ire_g;
 		if(g16 == 1)
 		{
 			is16 = 1;
@@ -205,21 +261,44 @@ int *read_sample_file(void *inpt_color)
 		stream = file_b;
 		istbc = tbcB;
 		sample_cnt = &sample_cnt_b;
+		line_cnt = &line_cnt_b;
+		line_sample_cnt = &line_sample_cnt_b;
+		field_cnt = & field_cnt_b;
+		chroma_gain = &c_gain_b;
+		ire_level = &ire_b;
 		if(b16 == 1)
 		{
 			is16 = 1;
 		}
 	}
 	
+	//IRE
+	const float ire_conv = 1.59375;// (255/160)
+	const float ire_min = 63.75;//40 * (255/160)
+	const float ire_new_max = 159.375;// (140 * (255/160)) - (40 * (255/160))
+	const float ire_add = (*ire_level * ire_conv);
+	const float ire_gain = (ire_new_max / (ire_new_max + ire_add));
+	double ire_tmp = 0;
+	
 	if(sample_rate == 17734475 || sample_rate == 17735845)//PAL multiplied by 2 if input is 16bit
 	{
-		frame_lengt = 709375 + (709375 * is16);
-		line_lengt = 1135 + (1135 * is16);
+		frame_lengt = 709375 * (1 + is16);
+		line_lengt = 1135 * (1 + is16);
+		frame_nb_line = 625;
+		v_start = 185 * (1 + is16);
+		v_end = 1107 * (1 + is16);
+		cbust_start = 98 * (1 + is16);//not set
+		cbust_end = 138 * (1 + is16);//not set
 	}
 	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC multiplied by 2 if input is 16bit
 	{
-		frame_lengt = 477750 + (477750 * is16);
-		line_lengt = 910 + (910 * is16);
+		frame_lengt = 477750 * (1 + is16);
+		line_lengt = 910 * (1 + is16);
+		frame_nb_line = 525;
+		v_start = 134 * (1 + is16);
+		v_end = 894 * (1 + is16);
+		cbust_start = 78 * (1 + is16);
+		cbust_end = 110 * (1 + is16);
 	}
 	
 	unsigned long buf_size = (1310720 + (is16 * 1310720));
@@ -277,9 +356,66 @@ int *read_sample_file(void *inpt_color)
 			y += 1;
 		}
 		
+		//color burst reading
+		if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end)) && (*line_cnt == (21 + ((unsigned long)*field_cnt % 2))))
+		{
+			cbust_sample = tmp_buf[i];
+			cbust_count += 1;
+			cbust_middle = cbust_sample / cbust_count;
+			cbust_offset = (cbust_middle - (cbust_middle / *chroma_gain));
+		}
+		
+		//chroma gain
+		
+		if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end * 1 + is16))&& (*line_cnt > (22 + ((unsigned long)*field_cnt % 2))))
+		{
+			tmp_buf[i] = round(tmp_buf[i] / *chroma_gain);// + cbust_offset;
+		}
+		
+		//ire 7.5 to ire 0
+		if (*ire_level != 0)
+		{
+			if(((*line_sample_cnt >= v_start) && (*line_sample_cnt <= v_end))&& *line_cnt > (22 + ((unsigned long)*field_cnt % 2)) )
+			{
+				ire_tmp = (tmp_buf[i] - ire_min);
+				
+				if(ire_tmp < 0)//clipping value
+				{
+					ire_tmp = 0;
+				}
+				
+				if(*ire_level > 0)//if we add ire
+				{
+					ire_tmp += ire_add;
+					tmp_buf[i] = round((ire_tmp * ire_gain) + ire_min);
+				}
+				else if(*ire_level < 0)//if we remove ire
+				{
+					ire_tmp = ire_tmp * ire_gain;
+					tmp_buf[i] += round(ire_add + ire_min);
+				}
+			}
+		}
+		
 		i += 1;//on avance tmp_buff de 1
 		
+		if(*line_cnt == ((frame_nb_line / 2) + ((unsigned long)*field_cnt % 2)))//field 1 = (max - 0.5)   field 2 = (max + 0.5)
+		{
+			*line_cnt = 0;
+			*field_cnt += 1;
+			cbust_sample = 0;
+			cbust_middle = 0;
+			cbust_count = 0;
+		}
+		
+		if(*line_sample_cnt == line_lengt)
+		{
+			*line_sample_cnt = 0;
+			*line_cnt += 1;
+		}
+		
 		*sample_cnt += (1 + is16);
+		*line_sample_cnt += (1 + is16);
 	}
 	
 	memcpy(buffer, tmp_buf, 1310720);
@@ -469,13 +605,19 @@ int main(int argc, char **argv)
 	
 	int option_index = 0;
 	static struct option long_options[] = {
-		{"R16", 0, 0, 'x'},
-		{"G16", 0, 0, 'y'},
-		{"B16", 0, 0, 'z'},
-		{"tbcR", 0, 0, 'j'},
-		{"tbcG", 0, 0, 'k'},
-		{"tbcB", 0, 0, 'l'},
-		{"readMode", 1, 0, 'm'},
+		{"R16", 0, 0, 1},
+		{"G16", 0, 0, 2},
+		{"B16", 0, 0, 3},
+		{"tbcR", 0, 0, 4},
+		{"tbcG", 0, 0, 5},
+		{"tbcB", 0, 0, 6},
+		{"readMode", 1, 0, 7},
+		{"CgainR", 1, 0, 8},
+		{"CgainG", 1, 0, 9},
+		{"CgainB", 1, 0, 10},
+		{"ireR", 1, 0, 11},
+		{"ireG", 1, 0, 12},
+		{"ireB", 1, 0, 13},
 		{0, 0, 0, 0}
 	};
 
@@ -516,26 +658,44 @@ int main(int argc, char **argv)
 			blue = 1;
 			filename_b = optarg;
 			break;
-		case 'x':
+		case 1:
 			r16 = 1;
 			break;
-		case 'y':
+		case 2:
 			g16 = 1;
 			break;
-		case 'z':
+		case 3:
 			b16 = 1;
 			break;
-		case 'j':
+		case 4:
 			tbcR = 1;
 			break;
-		case 'k':
+		case 5:
 			tbcG = 1;
 			break;
-		case 'l':
+		case 6:
 			tbcB = 1;
 			break;
-		case 'm':
+		case 7:
 			read_mode = (int)atoi(optarg);
+			break;
+		case 8:
+			c_gain_r = atof(optarg);
+			break;
+		case 9:
+			c_gain_g = atof(optarg);
+			break;
+		case 10:
+			c_gain_b = atof(optarg);
+			break;
+		case 11:
+			ire_r = atof(optarg);
+			break;
+		case 12:
+			ire_g = atof(optarg);
+			break;
+		case 13:
+			ire_b = atof(optarg);
 			break;
 		default:
 			usage();
@@ -558,6 +718,18 @@ int main(int argc, char **argv)
 	if(red == 0 && green == 0 && blue == 0)
 	{
 		fprintf(stderr, "\nNo file provided using option (-R,-G,-B)\n\n");
+		usage();
+	}
+	
+	if((c_gain_r < 0 || c_gain_r > 6) || (c_gain_g < 0 || c_gain_g > 6) || (c_gain_b < 0 || c_gain_b > 6))
+	{
+		fprintf(stderr, "\nOne chroma gain is invalid range (0.0 ,4.0)\n\n");
+		usage();
+	}
+	
+	if((ire_r < -50 || ire_r > 50) || (ire_g < -50 || ire_g > 50) || (ire_b < -50 || ire_b > 50))
+	{
+		fprintf(stderr, "\nIRE level is invalid range : (-50.0 , 50.0)\n\n");
 		usage();
 	}
 	
