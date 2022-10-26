@@ -356,20 +356,23 @@ int *read_sample_file(void *inpt_color)
 			y += 1;
 		}
 		
-		//color burst reading
-		if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end)) && (*line_cnt == (21 + ((unsigned long)*field_cnt % 2))))
+		if(*chroma_gain != 0)
 		{
-			cbust_sample = tmp_buf[i];
-			cbust_count += 1;
-			cbust_middle = cbust_sample / cbust_count;
-			cbust_offset = (cbust_middle - (cbust_middle / *chroma_gain));
-		}
-		
-		//chroma gain
-		
-		if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end * 1 + is16))&& (*line_cnt > (22 + ((unsigned long)*field_cnt % 2))))
-		{
-			tmp_buf[i] = round(tmp_buf[i] / *chroma_gain);// + cbust_offset;
+			//color burst reading
+			if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end)) && (*line_cnt == (21 + ((unsigned long)*field_cnt % 2))))
+			{
+				cbust_sample = tmp_buf[i];
+				cbust_count += 1;
+				cbust_middle = cbust_sample / cbust_count;
+				cbust_offset = (cbust_middle - (cbust_middle / *chroma_gain));
+			}
+			
+			//chroma gain
+			
+			if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end * 1 + is16))&& (*line_cnt > (22 + ((unsigned long)*field_cnt % 2))))
+			{
+				tmp_buf[i] = round(tmp_buf[i] / *chroma_gain);// + cbust_offset;
+			}
 		}
 		
 		//ire 7.5 to ire 0
@@ -383,17 +386,8 @@ int *read_sample_file(void *inpt_color)
 				{
 					ire_tmp = 0;
 				}
-				
-				if(*ire_level > 0)//if we add ire
-				{
-					ire_tmp += ire_add;
-					tmp_buf[i] = round((ire_tmp * ire_gain) + ire_min);
-				}
-				else if(*ire_level < 0)//if we remove ire
-				{
-					ire_tmp = ire_tmp * ire_gain;
-					tmp_buf[i] += round(ire_add + ire_min);
-				}
+				ire_tmp = ire_tmp * ire_gain;
+				tmp_buf[i] =  round(ire_tmp + ire_add + ire_min);
 			}
 		}
 		
