@@ -132,6 +132,9 @@ void usage(void)
 		"\t[-ireR IRE level for input R (-50.0 to +50.0)\n"
 		"\t[-ireG IRE level for input G (-50.0 to +50.0)\n"
 		"\t[-ireB IRE level for input B (-50.0 to +50.0)\n"
+		"\t[-FstartR seek to frame for input R\n"
+		"\t[-FstartG seek to frame for input G\n"
+		"\t[-FstartB seek to frame for input B\n"
 		"\t[-readMode (default = 0) option : 0 = multit-threading (RGB) / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)\n"
 	);
 	exit(1);
@@ -591,6 +594,9 @@ int main(int argc, char **argv)
 	uint32_t buf_num = 0;
 	int dev_index = 0;
 	void *status;
+	off64_t start_r = 0;
+	off64_t start_g = 0;
+	off64_t start_b = 0;
 
 	//file adress
 	char *filename_r = NULL;
@@ -612,6 +618,9 @@ int main(int argc, char **argv)
 		{"ireR", 1, 0, 11},
 		{"ireG", 1, 0, 12},
 		{"ireB", 1, 0, 13},
+		{"FstartR", 1, 0, 14},
+		{"FstartG", 1, 0, 15},
+		{"FstartB", 1, 0, 16},
 		{0, 0, 0, 0}
 	};
 
@@ -691,6 +700,15 @@ int main(int argc, char **argv)
 		case 13:
 			ire_b = atof(optarg);
 			break;
+		case 14:
+			start_r = atoi(optarg);
+			break;
+		case 15:
+			start_g = atoi(optarg);
+			break;
+		case 16:
+			start_b = atoi(optarg);
+			break;
 		default:
 			usage();
 			break;
@@ -727,6 +745,19 @@ int main(int argc, char **argv)
 		usage();
 	}
 	
+	if(samp_rate == 17734475 || samp_rate == 17735845)//PAL set first frame
+	{
+		start_r = start_r * ((709375 + (1135 * tbcR)) * (1 + r16));
+		start_g = start_g * ((709375 + (1135 * tbcB)) * (1 + g16));
+		start_b = start_b * ((709375 + (1135 * tbcG)) * (1 + b16));
+	}
+	else if(samp_rate == 14318181 || samp_rate == 14318170)//NTSC set first frame
+	{
+		start_r = start_r * ((477750 + (910 * tbcR)) * (1 + r16));
+		start_g = start_g * ((477750 + (910 * tbcG)) * (1 + g16));
+		start_b = start_b * ((477750 + (910 * tbcB)) * (1 + b16));
+	}
+	
 //RED
 if(red == 1)
 {
@@ -740,6 +771,10 @@ if(red == 1)
 		if (!file_r) {
 			fprintf(stderr, "(RED) : Failed to open %s\n", filename_r);
 			return -ENOENT;
+		}
+		else
+		{
+			fseeko64(file_r,start_r,0);
 		}
 	}
 
@@ -764,6 +799,10 @@ if(green == 1)
 			fprintf(stderr, "(GREEN) : Failed to open %s\n", filename_g);
 			return -ENOENT;
 		}
+		else
+		{
+			fseeko64(file_g,start_g,0);
+		}
 	}
 
 	txbuf_g = malloc(FL2K_BUF_LEN);
@@ -785,6 +824,10 @@ if(blue == 1)
 		if (!file_b) {
 			fprintf(stderr, "(BLUE) : Failed to open %s\n", filename_b);
 			return -ENOENT;
+		}
+		else
+		{
+			fseeko64(file_b,start_b,0);
 		}
 	}
 
