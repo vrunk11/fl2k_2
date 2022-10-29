@@ -129,21 +129,21 @@ For windows just use fl2k_2.exe
 
 Linux:
 
-`./fl2k_2 -u -s ntsc -G16 -tbcG -R example.tbc`
+`./fl2k_2 -u -s ntsc -G16 -tbcG -G example.tbc`
 
 Windows:
 
-`fl2k_2.exe -u -s ntsc -G16 -tbcG -R example.tbc`
+`fl2k_2.exe -u -s ntsc -G16 -tbcG -G example.tbc`
 
 ### S-Video output with Luma on the green channel and Chroma on the blue channel:
 
 Linux:
 
-`./fl2k_2 -u -s pal -G16 -tbcG -R example.tbc -B16 -tbcB -B example_chroma.tbc`
+`./fl2k_2 -u -s pal -G16 -tbcG -G example.tbc -B16 -tbcB -B example_chroma.tbc`
 
 Windows:
 
-`fl2k_2.exe -u -s pal -G16 -tbcG -R example.tbc -B16 -tbcB -B example_chroma.tbc`
+`fl2k_2.exe -u -s pal -G16 -tbcG -G example.tbc -B16 -tbcB -B example_chroma.tbc`
 
 # Commandlist
 
