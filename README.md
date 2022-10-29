@@ -173,11 +173,11 @@ Windows:
 
 `-tbcB` interpret B as tbc file
 
-`-CgainR` Control Signal Gain Level 
+`-CgainR` Control Chroma Gain Level (using color burst)
 
-`-CgainG` Control Signal Gain Level 
+`-CgainG` Control Chroma Gain Level (using color burst)
 
-`-CgainB` Control Signal Gain Level 
+`-CgainB` Control Chroma Gain Level (using color burst)
 
 ## Possible USB Issues
 
