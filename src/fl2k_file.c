@@ -28,6 +28,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <getopt.h>
+#include <unistd.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -53,6 +54,11 @@ FILE *file_r;
 FILE *file_g;
 FILE *file_b;
 
+FILE *file2_r;
+FILE *file2_g;
+FILE *file2_b;
+FILE *file_audio;
+
 //buffer for tx
 char *txbuf_r = NULL;
 char *txbuf_g = NULL;
@@ -62,6 +68,12 @@ char *txbuf_b = NULL;
 int red = 0;
 int green = 0;
 int blue = 0;
+int red2 = 0;
+int green2 = 0;
+int blue2 = 0;
+int audio = 0;
+
+char sync_a = 0;
 
 //enable 16 bit to 8 bit conversion
 int r16 = 0;
@@ -104,6 +116,8 @@ uint32_t field_cnt_r = 0;//used for tbc processing
 uint32_t field_cnt_g = 0;//used for tbc processing
 uint32_t field_cnt_b = 0;//used for tbc processing
 
+unsigned char *pipe_buf = NULL;
+
 //thread for processing
 pthread_t thread_r;
 pthread_t thread_g;
@@ -120,6 +134,11 @@ void usage(void)
 		"\t[-R filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
 		"\t[-B filename (use '-' to read from stdin)\n"
+		"\t[-A audio file (use '-' to read from stdin)\n"
+		"\t[-syncA chanel used for sync the audio file \ default : G value : (R ,G ,B)\n"
+		"\t[-R2 secondary file to be combined with R (use '-' to read from stdin)\n"
+		"\t[-G2 secondary file to be combined with G (use '-' to read from stdin)\n"
+		"\t[-B2 secondary file to be combined with B (use '-' to read from stdin)\n"
 		"\t[-R16 (convert bits 16 to 8)\n"
 		"\t[-G16 (convert bits 16 to 8)\n"
 		"\t[-B16 (convert bits 16 to 8)\n"
@@ -193,6 +212,7 @@ int *read_sample_file(void *inpt_color)
 	//parametter
 	void *buffer = NULL;
 	FILE *stream = NULL;
+	FILE *stream2 = NULL;
 	int istbc = 0;
 	char color = (char *) inpt_color;
 	uint32_t sample_rate = samp_rate;
@@ -200,6 +220,7 @@ int *read_sample_file(void *inpt_color)
 	double *ire_level = NULL;
 	
 	int is16 = 0;
+	int is_stereo = 0;
 	
 	long i = 0;//counter for tmp_buf
 	long y = 0;//counter for calc
@@ -225,11 +246,12 @@ int *read_sample_file(void *inpt_color)
 	uint32_t *line_cnt = NULL;
 	uint32_t *line_sample_cnt = NULL;
 	uint32_t *field_cnt = NULL;
-	
+
 	if(color == 'R')
 	{
 		buffer = txbuf_r;
 		stream = file_r;
+		stream2 = file2_r;
 		istbc = tbcR;
 		sample_cnt = &sample_cnt_r;
 		line_cnt = &line_cnt_r;
@@ -237,15 +259,14 @@ int *read_sample_file(void *inpt_color)
 		field_cnt = & field_cnt_r;
 		chroma_gain = &c_gain_r;
 		ire_level = &ire_r;
-		if(r16 == 1)
-		{
-			is16 = 1;
-		}
+		is_stereo = red2;
+		is16 = r16;
 	}
 	else if(color == 'G')
 	{
 		buffer = txbuf_g;
 		stream = file_g;
+		stream2 = file2_g;
 		istbc = tbcG;
 		sample_cnt = &sample_cnt_g;
 		line_cnt = &line_cnt_g;
@@ -253,15 +274,14 @@ int *read_sample_file(void *inpt_color)
 		field_cnt = & field_cnt_g;
 		chroma_gain = &c_gain_g;
 		ire_level = &ire_g;
-		if(g16 == 1)
-		{
-			is16 = 1;
-		}
+		is_stereo = green2;
+		is16 = g16;
 	}
 	else if(color == 'B')
 	{
 		buffer = txbuf_b;
 		stream = file_b;
+		stream2 = file2_b;
 		istbc = tbcB;
 		sample_cnt = &sample_cnt_b;
 		line_cnt = &line_cnt_b;
@@ -269,10 +289,8 @@ int *read_sample_file(void *inpt_color)
 		field_cnt = & field_cnt_b;
 		chroma_gain = &c_gain_b;
 		ire_level = &ire_b;
-		if(b16 == 1)
-		{
-			is16 = 1;
-		}
+		is_stereo = blue2;
+		is16 = b16;
 	}
 	
 	//IRE
@@ -292,6 +310,7 @@ int *read_sample_file(void *inpt_color)
 		v_end = 1107 * (1 + is16);
 		cbust_start = 98 * (1 + is16);//not set
 		cbust_end = 138 * (1 + is16);//not set
+		sample_skip = 4 * (1 + is16);//remove 4 extra sample in pal
 	}
 	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC multiplied by 2 if input is 16bit
 	{
@@ -308,13 +327,23 @@ int *read_sample_file(void *inpt_color)
 	
 	if(istbc == 1)
 	{
-		sample_skip = calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
+		sample_skip += calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
 	}
 	
 	buf_size += sample_skip;
 	
 	unsigned char *tmp_buf = malloc(1310720);
 	unsigned char *calc = malloc(buf_size);
+	unsigned char *calc2 = malloc(buf_size);
+	unsigned short value16 = 0;
+	unsigned short value16_2 = 0;
+	unsigned char value8 = 0;
+	unsigned char value8_2 = 0;
+	
+	short *value16_signed = (void *)&value16;
+	short *value16_2_signed = (void *)&value16_2;
+	char *value8_signed = (void *)&value8;
+	char *value8_2_signed = (void *)&value8_2;
 	
 	if (tmp_buf == NULL || calc == NULL)
 	{
@@ -329,15 +358,31 @@ int *read_sample_file(void *inpt_color)
 		sample_skip = calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
 	}
 	
-	if(fread(calc,buf_size,1,stream) != 1)
+	if(is_stereo)
 	{
-		free(tmp_buf);   // Free both in case only one was allocated
-		free(calc);
-		fprintf(stderr, "(%c) fread error %d : ",color,errno);
-		perror(NULL);
-		return -1;
+		if(fread(calc,buf_size,1,stream) != 1 || fread(calc2,buf_size,1,stream2) != 1)
+		{
+			free(tmp_buf);   // Free both in case only one was allocated
+			free(calc);
+			free(calc2);
+			fprintf(stderr, "(%c) fread error %d : ",color,errno);
+			perror(NULL);
+			return -1;
+		}
 	}
-	
+	else
+	{
+		if(fread(calc,buf_size,1,stream) != 1)
+		{
+			free(tmp_buf);   // Free both in case only one was allocated
+			free(calc);
+			free(calc2);
+			fprintf(stderr, "(%c) fread error %d : ",color,errno);
+			perror(NULL);
+			return -1;
+		}
+	}
+
 	while((y < buf_size) && !do_exit)
 	{
 		//if we are at then end of the frame skip one line
@@ -350,13 +395,42 @@ int *read_sample_file(void *inpt_color)
 		
 		if(is16 == 1)
 		{
-			tmp_buf[i] = round(((calc[y+1] * 256) + calc[y])/ 256.0);//convert to 8 bit
+			value16 = ((calc[y+1] * 256) + calc[y]);
+			if(is_stereo)
+			{
+				value16_2 = ((calc2[y+1] * 256) + calc2[y]);
+			}
 			y += 2;
 		}
 		else
 		{
-			tmp_buf[i] = calc[y];
+			value8 = calc[y];
+			if(is_stereo)
+			{
+				value8_2 = calc2[y];
+			}
 			y += 1;
+		}
+		
+		//convert 16bit to 8bit and combine
+		if(is16 == 1)
+		{
+			if(is_stereo)
+			{
+				tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
+			}
+			else
+			{
+				tmp_buf[i] = round(value16 / 256.0);//convert to 8 bit
+			}
+		}
+		else if(is_stereo)//combine 2 file
+		{
+			tmp_buf[i] = *value8_signed + *value8_2_signed + 128;
+		}
+		else//no processing
+		{
+			tmp_buf[i] = value8;
 		}
 		
 		if(*chroma_gain != 0)
@@ -417,8 +491,17 @@ int *read_sample_file(void *inpt_color)
 	
 	memcpy(buffer, tmp_buf, 1310720);
 	
+	//write to stdout only if its not a terminal
+	if(isatty(STDOUT_FILENO) == 0)
+	{
+		//write(stdout, tmp_buf, 1310720);
+		fwrite(tmp_buf, 1310720,1,stdout);
+		fflush(stdout);
+	}
+	
 	free(tmp_buf);
 	free(calc);
+	free(calc2);
 	
 	if(color == 'R')
 	{
@@ -589,6 +672,8 @@ int main(int argc, char **argv)
 {
 #ifndef _WIN32
 	struct sigaction sigact, sigign;
+	_setmode(_fileno(stdout), O_BINARY);
+	_setmode(_fileno(stdin), O_BINARY);	
 #endif
 	int r, opt, i;
 	uint32_t buf_num = 0;
@@ -597,11 +682,28 @@ int main(int argc, char **argv)
 	off64_t start_r = 0;
 	off64_t start_g = 0;
 	off64_t start_b = 0;
+	off64_t start_audio = 0;
 
 	//file adress
 	char *filename_r = NULL;
 	char *filename_g = NULL;
 	char *filename_b = NULL;
+	
+	char *filename2_r = NULL;
+	char *filename2_g = NULL;
+	char *filename2_b = NULL;
+	char *filename_audio = NULL;
+	
+	pipe_buf = malloc(1310720);
+	
+	if (pipe_buf == NULL)
+	{
+		free(pipe_buf);   // Free both in case only one was allocated
+		fprintf(stderr, "malloc error (pipe_buf)\n");
+		return -1;
+	}
+	
+	setvbuf(stdout,pipe_buf,_IOLBF,1310720);
 	
 	int option_index = 0;
 	static struct option long_options[] = {
@@ -621,10 +723,15 @@ int main(int argc, char **argv)
 		{"FstartR", 1, 0, 14},
 		{"FstartG", 1, 0, 15},
 		{"FstartB", 1, 0, 16},
+		{"FstartA", 1, 0, 16},
+		{"R2", 1, 0, 17},
+		{"G2", 1, 0, 18},
+		{"B2", 1, 0, 19},
+		{"syncA", 1, 0, 20},
 		{0, 0, 0, 0}
 	};
 
-	while ((opt = getopt_long_only(argc, argv, "d:r:s:uR:G:B:",long_options, &option_index)) != -1) {
+	while ((opt = getopt_long_only(argc, argv, "d:r:s:uR:G:B:A:",long_options, &option_index)) != -1) {
 		switch (opt) {
 		case 'd':
 			dev_index = (uint32_t)atoi(optarg);
@@ -660,6 +767,10 @@ int main(int argc, char **argv)
 		case 'B':
 			blue = 1;
 			filename_b = optarg;
+			break;
+		case 'A':
+			audio = 1;
+			filename_audio = optarg;
 			break;
 		case 1:
 			r16 = 1;
@@ -709,6 +820,24 @@ int main(int argc, char **argv)
 		case 16:
 			start_b = atoi(optarg);
 			break;
+		case 17:
+			red2 = 1;
+			filename2_r = optarg;
+			break;
+		case 18:
+			green2 = 1;
+			filename2_g = optarg;
+			break;
+		case 19:
+			blue2 = 1;
+			filename2_b = optarg;
+			break;
+		case 20:
+			if(optarg == 'r'){sync_a = 'R';}
+			else if(optarg == 'g'){sync_a = 'G';}
+			else if(optarg == 'b'){sync_a = 'B';}
+			else{sync_a = optarg;}
+			break;
 		default:
 			usage();
 			break;
@@ -733,15 +862,31 @@ int main(int argc, char **argv)
 		usage();
 	}
 	
+	if((red == 0 && red2 == 1) || (green == 0 && green2 == 1) || (blue == 0 && blue2 == 1))
+	{
+		fprintf(stderr, "\nNo main file provided using (-R,-G,-B)\n\n");
+		usage();
+	}
+	
+	if((sync_a != 'R') && (sync_a != 'G') && (sync_a != 'B') && (sync_a != 0))
+	{
+		fprintf(stderr, "\nUnknow parametter '%c' for option -syncA / value : (R,r,G,g,B,b)\n\n",sync_a);
+		usage();
+	}
+	else if(sync_a == 'R'){start_audio = start_r;}
+	else if(sync_a == 'G'){start_audio = start_g;}
+	else if(sync_a == 'B'){start_audio = start_b;}
+	else {start_audio = start_g; sync_a = 'G';}//default value
+	
 	if((c_gain_r < 0 || c_gain_r > 6) || (c_gain_g < 0 || c_gain_g > 6) || (c_gain_b < 0 || c_gain_b > 6))
 	{
-		fprintf(stderr, "\nOne chroma gain is invalid range (0.0 ,4.0)\n\n");
+		fprintf(stderr, "\nOne chroma gain is invalid / range : (0.0 ,4.0)\n\n");
 		usage();
 	}
 	
 	if((ire_r < -50 || ire_r > 50) || (ire_g < -50 || ire_g > 50) || (ire_b < -50 || ire_b > 50))
 	{
-		fprintf(stderr, "\nIRE level is invalid range : (-50.0 , 50.0)\n\n");
+		fprintf(stderr, "\nIRE level is invalid / range : (-50.0 , 50.0)\n\n");
 		usage();
 	}
 	
@@ -750,23 +895,25 @@ int main(int argc, char **argv)
 		start_r = start_r * ((709375 + (1135 * tbcR)) * (1 + r16));
 		start_g = start_g * ((709375 + (1135 * tbcB)) * (1 + g16));
 		start_b = start_b * ((709375 + (1135 * tbcG)) * (1 + b16));
+		start_audio = start_audio * ((88200/25) * (1 + b16));
 	}
 	else if(samp_rate == 14318181 || samp_rate == 14318170)//NTSC set first frame
 	{
 		start_r = start_r * ((477750 + (910 * tbcR)) * (1 + r16));
 		start_g = start_g * ((477750 + (910 * tbcG)) * (1 + g16));
 		start_b = start_b * ((477750 + (910 * tbcB)) * (1 + b16));
+		start_audio = start_audio * ((88200/30) * (1 + b16));
 	}
 	
 //RED
 if(red == 1)
 {
-	if (strcmp(filename_r, "-") == 0) { /* Read samples from stdin */
+	if (strcmp(filename_r, "-") == 0)/* Read samples from stdin */
+	{
 		file_r = stdin;
-#ifdef _WIN32
-		_setmode(_fileno(stdin), _O_BINARY);
-#endif
-	} else {
+	}
+	else
+	{
 		file_r = fopen(filename_r, "rb");
 		if (!file_r) {
 			fprintf(stderr, "(RED) : Failed to open %s\n", filename_r);
@@ -785,15 +932,35 @@ if(red == 1)
 	}
 }
 
+if(red2 == 1)
+{
+	if (strcmp(filename2_r, "-") == 0)/* Read samples from stdin */
+	{ 
+		file2_r = stdin;
+	}
+	else 
+	{
+		file2_r = fopen(filename2_r, "rb");
+		if (!file2_r) {
+			fprintf(stderr, "(RED) : Failed to open %s\n", filename2_r);
+			return -ENOENT;
+		}
+		else
+		{
+			fseeko64(file2_r,start_r,0);
+		}
+	}
+}
+
 //GREEN
 if(green == 1)
 {
-	if (strcmp(filename_g, "-") == 0) { /* Read samples from stdin */
+	if (strcmp(filename_g, "-") == 0)/* Read samples from stdin */
+	{
 		file_g = stdin;
-#ifdef _WIN32
-		_setmode(_fileno(stdin), _O_BINARY);
-#endif
-	} else {
+	}
+	else
+	{
 		file_g = fopen(filename_g, "rb");
 		if (!file_g) {
 			fprintf(stderr, "(GREEN) : Failed to open %s\n", filename_g);
@@ -811,15 +978,36 @@ if(green == 1)
 		goto out;
 	}
 }
+
+if(green2 == 1)
+{
+	if (strcmp(filename2_g, "-") == 0)/* Read samples from stdin */
+	{ 
+		file2_g = stdin;
+	}
+	else 
+	{
+		file2_g = fopen(filename2_g, "rb");
+		if (!file2_g) {
+			fprintf(stderr, "(GREEN) : Failed to open %s\n", filename2_g);
+			return -ENOENT;
+		}
+		else
+		{
+			fseeko64(file2_g,start_g,0);
+		}
+	}
+}
+
 //BLUE
 if(blue == 1)
 {
-	if (strcmp(filename_b, "-") == 0) { /* Read samples from stdin */
+	if (strcmp(filename_b, "-") == 0)/* Read samples from stdin */
+	{
 		file_b = stdin;
-#ifdef _WIN32
-		_setmode(_fileno(stdin), _O_BINARY);
-#endif
-	} else {
+	}
+	else
+	{
 		file_b = fopen(filename_b, "rb");
 		if (!file_b) {
 			fprintf(stderr, "(BLUE) : Failed to open %s\n", filename_b);
@@ -835,6 +1023,46 @@ if(blue == 1)
 	if (!txbuf_b) {
 		fprintf(stderr, "(BLUE) : malloc error!\n");
 		goto out;
+	}
+}
+
+if(blue2 == 1)
+{
+	if (strcmp(filename2_b, "-") == 0)/* Read samples from stdin */
+	{ 
+		file2_b = stdin;
+	}
+	else 
+	{
+		file2_b = fopen(filename2_b, "rb");
+		if (!file2_b) {
+			fprintf(stderr, "(BLUE) : Failed to open %s\n", filename2_b);
+			return -ENOENT;
+		}
+		else
+		{
+			fseeko64(file2_b,start_b,0);
+		}
+	}
+}
+
+if(audio == 1)
+{
+	if (strcmp(filename_audio, "-") == 0)/* Read samples from stdin */
+	{ 
+		file_audio = stdin;
+	}
+	else 
+	{
+		file_audio = fopen(filename_audio, "rb");
+		if (!file_audio) {
+			fprintf(stderr, "(AUDIO) : Failed to open %s\n", filename_audio);
+			return -ENOENT;
+		}
+		else
+		{
+			fseeko64(file_audio,start_audio,0);
+		}
 	}
 }
 
@@ -873,45 +1101,81 @@ if(blue == 1)
 	fl2k_close(dev);
 
 out:
+
 //RED
-if(red == 1)
-{
-	if (txbuf_r)
+	if(red == 1)
 	{
-		free(txbuf_r);
-	}
+		if (txbuf_r)
+		{
+			free(txbuf_r);
+		}
 
-	if (file_r && (file_r != stdin))
-	{
-		fclose(file_r);
+		if (file_r && (file_r != stdin))
+		{
+			fclose(file_r);
+		}
 	}
-}
-//GREEN
-if(green == 1)
-{
-	if (txbuf_g)
+	
+	if(red2 == 1)
 	{
-		free(txbuf_g);
+		if (file2_r && (file2_r != stdin))
+		{
+			fclose(file2_r);
+		}
 	}
+	//GREEN
+	if(green == 1)
+	{
+		if (txbuf_g)
+		{
+			free(txbuf_g);
+		}
 
-	if (file_g && (file_g != stdin))
-	{
-		fclose(file_g);
+		if (file_g && (file_g != stdin))
+		{
+			fclose(file_g);
+		}
 	}
-}
-//BLUE	
-if(blue == 1)
-{
-	if (txbuf_b)
+	
+	if(green2 == 1)
 	{
-		free(txbuf_b);
+		if (file2_g && (file2_g != stdin))
+		{
+			fclose(file2_g);
+		}
 	}
+	
+	//BLUE	
+	if(blue == 1)
+	{
+		if (txbuf_b)
+		{
+			free(txbuf_b);
+		}
 
-	if (file_b && (file_b != stdin))
-	{
-		fclose(file_b);
+		if (file_b && (file_b != stdin))
+		{
+			fclose(file_b);
+		}
 	}
-}
+	
+	if(blue2 == 1)
+	{
+		if (file2_b && (file2_b != stdin))
+		{
+			fclose(file2_b);
+		}
+	}
+	
+	if(audio == 1)
+	{
+		if (file_audio && (file_audio != stdin))
+		{
+			fclose(file_audio);
+		}
+	}
+	
+	free(pipe_buf);
 
 	return 0;
 }
