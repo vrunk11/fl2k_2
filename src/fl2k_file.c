@@ -95,6 +95,11 @@ double c_gain_r = 1;
 double c_gain_g = 1;
 double c_gain_b = 1;
 
+//combine mode
+int cmb_mode_r = 0;
+int cmb_mode_g = 0;
+int cmb_mode_b = 0;
+
 //
 int read_mode = 0;//0 = multitthreading / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)
 
@@ -135,13 +140,16 @@ void usage(void)
 		"\t[-G filename (use '-' to read from stdin)\n"
 		"\t[-B filename (use '-' to read from stdin)\n"
 		"\t[-A audio file (use '-' to read from stdin)\n"
-		"\t[-syncA chanel used for sync the audio file \ default : G value : (R ,G ,B)\n"
+		"\t[-syncA chanel used for sync the audio file \ default : G \ value = (R ,G ,B)\n"
 		"\t[-R2 secondary file to be combined with R (use '-' to read from stdin)\n"
 		"\t[-G2 secondary file to be combined with G (use '-' to read from stdin)\n"
 		"\t[-B2 secondary file to be combined with B (use '-' to read from stdin)\n"
 		"\t[-R16 (convert bits 16 to 8)\n"
 		"\t[-G16 (convert bits 16 to 8)\n"
 		"\t[-B16 (convert bits 16 to 8)\n"
+		"\t[-cmbModeR combine mode \ default : 0 \ value = (0 ,1)\n"
+		"\t[-cmbModeG combine mode \ default : 0 \ value = (0 ,1)\n"
+		"\t[-cmbModeB combine mode \ default : 0 \ value = (0 ,1)\n"
 		"\t[-tbcR interpret R as tbc file\n"
 		"\t[-tbcG interpret G as tbc file\n"
 		"\t[-tbcB interpret B as tbc file\n"
@@ -213,6 +221,7 @@ int *read_sample_file(void *inpt_color)
 	void *buffer = NULL;
 	FILE *stream = NULL;
 	FILE *stream2 = NULL;
+	FILE *streamA = NULL;
 	int istbc = 0;
 	char color = (char *) inpt_color;
 	uint32_t sample_rate = samp_rate;
@@ -221,6 +230,8 @@ int *read_sample_file(void *inpt_color)
 	
 	int is16 = 0;
 	int is_stereo = 0;
+	int combine_mode = 0;
+	int is_sync_a = 0;
 	
 	long i = 0;//counter for tmp_buf
 	long y = 0;//counter for calc
@@ -232,6 +243,7 @@ int *read_sample_file(void *inpt_color)
 	unsigned int v_end =0;
 	unsigned long line_lengt = 0;
 	unsigned long sample_skip = 0;
+	unsigned int audio_frame = 0;
 	
 	//COLOR BURST
 	unsigned int cbust_sample = 0;
@@ -260,7 +272,13 @@ int *read_sample_file(void *inpt_color)
 		chroma_gain = &c_gain_r;
 		ire_level = &ire_r;
 		is_stereo = red2;
+		combine_mode = cmb_mode_r;
 		is16 = r16;
+		if(sync_a == 'R')
+		{
+			is_sync_a = 1;
+			streamA = file_audio;
+		}
 	}
 	else if(color == 'G')
 	{
@@ -275,7 +293,13 @@ int *read_sample_file(void *inpt_color)
 		chroma_gain = &c_gain_g;
 		ire_level = &ire_g;
 		is_stereo = green2;
+		combine_mode = cmb_mode_g;
 		is16 = g16;
+		if(sync_a == 'G')
+		{
+			is_sync_a = 1;
+			streamA = file_audio;
+		}
 	}
 	else if(color == 'B')
 	{
@@ -290,7 +314,13 @@ int *read_sample_file(void *inpt_color)
 		chroma_gain = &c_gain_b;
 		ire_level = &ire_b;
 		is_stereo = blue2;
+		combine_mode = cmb_mode_b;
 		is16 = b16;
+		if(sync_a == 'B')
+		{
+			is_sync_a = 1;
+			streamA = file_audio;
+		}
 	}
 	
 	//IRE
@@ -310,7 +340,8 @@ int *read_sample_file(void *inpt_color)
 		v_end = 1107 * (1 + is16);
 		cbust_start = 98 * (1 + is16);//not set
 		cbust_end = 138 * (1 + is16);//not set
-		sample_skip = 4 * (1 + is16);//remove 4 extra sample in pal
+		audio_frame = ((88200/25) * (1 + b16));
+		//sample_skip = 4 * (1 + is16);//remove 4 extra sample in pal
 	}
 	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC multiplied by 2 if input is 16bit
 	{
@@ -321,6 +352,7 @@ int *read_sample_file(void *inpt_color)
 		v_end = 894 * (1 + is16);
 		cbust_start = 78 * (1 + is16);
 		cbust_end = 110 * (1 + is16);
+		audio_frame = ((88200/30) * (1 + b16));
 	}
 	
 	unsigned long buf_size = (1310720 + (is16 * 1310720));
@@ -333,6 +365,8 @@ int *read_sample_file(void *inpt_color)
 	buf_size += sample_skip;
 	
 	unsigned char *tmp_buf = malloc(1310720);
+	unsigned char *audio_buf = malloc(audio_frame);
+	char *audio_buf_signed = (void *)audio_buf;
 	unsigned char *calc = malloc(buf_size);
 	unsigned char *calc2 = malloc(buf_size);
 	unsigned short value16 = 0;
@@ -391,6 +425,16 @@ int *read_sample_file(void *inpt_color)
 			//skip 1 line
 			y += line_lengt;
 			*sample_cnt = 0;
+			
+			//write audio file to stdout only if its not a terminal
+			if(isatty(STDOUT_FILENO) == 0 && is_sync_a)
+			{
+				//write(stdout, tmp_buf, 1310720);
+				fread(audio_buf_signed,audio_frame,1,streamA);
+				//write(stdout, audio_buf_signed, audio_frame);
+				fwrite(audio_buf, audio_frame,1,stdout);
+				fflush(stdout);
+			}
 		}
 		
 		if(is16 == 1)
@@ -417,7 +461,15 @@ int *read_sample_file(void *inpt_color)
 		{
 			if(is_stereo)
 			{
-				tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
+				if(combine_mode == 0)//default
+				{
+					tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
+				}
+				else//mode 1
+				{
+					tmp_buf[i] = round(((*value16_signed + *value16_2_signed)/2)/ 256.0);//convert to 8 bit
+				}
+				
 			}
 			else
 			{
@@ -426,7 +478,14 @@ int *read_sample_file(void *inpt_color)
 		}
 		else if(is_stereo)//combine 2 file
 		{
-			tmp_buf[i] = *value8_signed + *value8_2_signed + 128;
+			if(combine_mode == 0)//default
+			{
+				tmp_buf[i] = *value8_signed + *value8_2_signed + 128;
+			}
+			else//mode 1
+			{
+				tmp_buf[i] = round((*value8_signed + *value8_2_signed)/2);
+			}
 		}
 		else//no processing
 		{
@@ -491,15 +550,8 @@ int *read_sample_file(void *inpt_color)
 	
 	memcpy(buffer, tmp_buf, 1310720);
 	
-	//write to stdout only if its not a terminal
-	if(isatty(STDOUT_FILENO) == 0)
-	{
-		//write(stdout, tmp_buf, 1310720);
-		fwrite(tmp_buf, 1310720,1,stdout);
-		fflush(stdout);
-	}
-	
 	free(tmp_buf);
+	free(audio_buf);
 	free(calc);
 	free(calc2);
 	
@@ -728,6 +780,9 @@ int main(int argc, char **argv)
 		{"G2", 1, 0, 18},
 		{"B2", 1, 0, 19},
 		{"syncA", 1, 0, 20},
+		{"cmbModeR", 1, 0, 21},
+		{"cmbModeG", 1, 0, 22},
+		{"cmbModeB", 1, 0, 23},
 		{0, 0, 0, 0}
 	};
 
@@ -838,6 +893,15 @@ int main(int argc, char **argv)
 			else if(optarg == 'b'){sync_a = 'B';}
 			else{sync_a = optarg;}
 			break;
+		case 21:
+			cmb_mode_r = atoi(optarg);
+			break;
+		case 22:
+			cmb_mode_g = atoi(optarg);
+			break;
+		case 23:
+			cmb_mode_b = atoi(optarg);
+			break;
 		default:
 			usage();
 			break;
@@ -877,6 +941,12 @@ int main(int argc, char **argv)
 	else if(sync_a == 'G'){start_audio = start_g;}
 	else if(sync_a == 'B'){start_audio = start_b;}
 	else {start_audio = start_g; sync_a = 'G';}//default value
+	
+	if((cmb_mode_r < 0 || cmb_mode_r > 1) || (cmb_mode_g < 0 ||cmb_mode_g > 1) || (cmb_mode_b < 0 || cmb_mode_b > 1))
+	{
+		fprintf(stderr, "\nCombine mode invalid / value : (0 ,1)\n\n");
+		usage();
+	}
 	
 	if((c_gain_r < 0 || c_gain_r > 6) || (c_gain_g < 0 || c_gain_g > 6) || (c_gain_b < 0 || c_gain_b > 6))
 	{
