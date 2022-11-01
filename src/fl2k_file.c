@@ -81,7 +81,7 @@ int green2 = 0;
 int blue2 = 0;
 int audio = 0;
 
-char sync_a = 0;
+char sync_a = 'G';
 
 //enable 16 bit to 8 bit conversion
 int r16 = 0;
@@ -108,8 +108,11 @@ int cmb_mode_r = 0;
 int cmb_mode_g = 0;
 int cmb_mode_b = 0;
 
-//
+//read mode
 int read_mode = 0;//0 = multitthreading / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)
+
+//pipe mode
+char pipe_mode = 'A';
 
 int sample_type = 1;// 1 == signed   0 == unsigned
 
@@ -129,7 +132,7 @@ uint32_t field_cnt_r = 0;//used for tbc processing
 uint32_t field_cnt_g = 0;//used for tbc processing
 uint32_t field_cnt_b = 0;//used for tbc processing
 
-unsigned char *pipe_buf = NULL;
+//unsigned char *pipe_buf = NULL;
 
 //thread for processing
 pthread_t thread_r;
@@ -170,6 +173,8 @@ void usage(void)
 		"\t[-FstartR seek to frame for input R\n"
 		"\t[-FstartG seek to frame for input G\n"
 		"\t[-FstartB seek to frame for input B\n"
+		"\t[-audioOffset offset audio from a duration of x frame\n"
+		"\t[-pipeMode (default = A) option : A = Audio file / R = output of R / G = output of G / B = output of B\n"
 		"\t[-readMode (default = 0) option : 0 = multit-threading (RGB) / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)\n"
 	);
 	exit(1);
@@ -240,6 +245,7 @@ int read_sample_file(void *inpt_color)
 	int is_stereo = 0;
 	int combine_mode = 0;
 	int is_sync_a = 0;
+	int use_pipe = 0;
 	
 	long i = 0;//counter for tmp_buf
 	long y = 0;//counter for calc
@@ -282,10 +288,14 @@ int read_sample_file(void *inpt_color)
 		is_stereo = red2;
 		combine_mode = cmb_mode_r;
 		is16 = r16;
-		if(sync_a == 'R')
+		if(sync_a == 'R' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
 			streamA = file_audio;
+		}
+		else if(pipe_mode == 'R')
+		{
+			use_pipe = 1;
 		}
 	}
 	else if(color == 'G')
@@ -303,10 +313,14 @@ int read_sample_file(void *inpt_color)
 		is_stereo = green2;
 		combine_mode = cmb_mode_g;
 		is16 = g16;
-		if(sync_a == 'G')
+		if(sync_a == 'G' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
 			streamA = file_audio;
+		}
+		else if(pipe_mode == 'G')
+		{
+			use_pipe = 1;
 		}
 	}
 	else if(color == 'B')
@@ -324,10 +338,14 @@ int read_sample_file(void *inpt_color)
 		is_stereo = blue2;
 		combine_mode = cmb_mode_b;
 		is16 = b16;
-		if(sync_a == 'B')
+		if(sync_a == 'B' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
 			streamA = file_audio;
+		}
+		else if(pipe_mode == 'B')
+		{
+			use_pipe = 1;
 		}
 	}
 	
@@ -348,7 +366,7 @@ int read_sample_file(void *inpt_color)
 		v_end = 1107 * (1 + is16);
 		cbust_start = 98 * (1 + is16);//not set
 		cbust_end = 138 * (1 + is16);//not set
-		audio_frame = ((88200/25) * (1 + b16));
+		audio_frame = ((88200/25) *2);
 		//sample_skip = 4 * (1 + is16);//remove 4 extra sample in pal
 	}
 	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC multiplied by 2 if input is 16bit
@@ -360,7 +378,7 @@ int read_sample_file(void *inpt_color)
 		v_end = 894 * (1 + is16);
 		cbust_start = 78 * (1 + is16);
 		cbust_end = 110 * (1 + is16);
-		audio_frame = ((88200/30) * (1 + b16));
+		audio_frame = ((88200/30) * 2);
 	}
 	
 	unsigned long buf_size = (1310720 + (is16 * 1310720));
@@ -471,7 +489,7 @@ int read_sample_file(void *inpt_color)
 			{
 				if(combine_mode == 0)//default
 				{
-					tmp_buf[i] = round((value16 + value16_2)/ 256.0);//convert to 8 bit
+					tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
 				}
 				else//mode 1
 				{
@@ -557,6 +575,11 @@ int read_sample_file(void *inpt_color)
 	}
 	
 	memcpy(buffer, tmp_buf, 1310720);
+	if(isatty(STDOUT_FILENO) == 0 && use_pipe)
+	{
+		fwrite(tmp_buf, 1310720,1,stdout);
+		fflush(stdout);
+	}
 	
 	free(tmp_buf);
 	free(audio_buf);
@@ -748,6 +771,8 @@ int main(int argc, char **argv)
 	uint64_t start_g = 0;
 	uint64_t start_b = 0;
 	uint64_t start_audio = 0;
+	
+	long audio_offset = 0;
 
 	//file adress
 	char *filename_r = NULL;
@@ -759,16 +784,16 @@ int main(int argc, char **argv)
 	char *filename2_b = NULL;
 	char *filename_audio = NULL;
 	
-	pipe_buf = malloc(1310720);
+	//pipe_buf = malloc(1310720);
 	
-	if (pipe_buf == NULL)
+	/*if (pipe_buf == NULL)
 	{
 		free(pipe_buf);   // Free both in case only one was allocated
 		fprintf(stderr, "malloc error (pipe_buf)\n");
 		return -1;
-	}
+	}*/
 	
-	setvbuf(stdout,pipe_buf,_IOLBF,1310720);
+	//setvbuf(stdout,pipe_buf,_IOLBF,1310720);
 	
 	int option_index = 0;
 	static struct option long_options[] = {
@@ -796,6 +821,8 @@ int main(int argc, char **argv)
 		{"cmbModeR", 1, 0, 21},
 		{"cmbModeG", 1, 0, 22},
 		{"cmbModeB", 1, 0, 23},
+		{"audioOffset", 1, 0, 24},
+		{"pipeMode", 1, 0, 25},
 		{0, 0, 0, 0}
 	};
 
@@ -901,10 +928,10 @@ int main(int argc, char **argv)
 			filename2_b = optarg;
 			break;
 		case 20:
-			if(optarg == 'r'){sync_a = 'R';}
-			else if(optarg == 'g'){sync_a = 'G';}
-			else if(optarg == 'b'){sync_a = 'B';}
-			else{sync_a = optarg;}
+			if(*optarg == 'r'){sync_a = 'R';}
+			else if(*optarg == 'g'){sync_a = 'G';}
+			else if(*optarg == 'b'){sync_a = 'B';}
+			else{sync_a = *optarg;}
 			break;
 		case 21:
 			cmb_mode_r = atoi(optarg);
@@ -914,6 +941,16 @@ int main(int argc, char **argv)
 			break;
 		case 23:
 			cmb_mode_b = atoi(optarg);
+			break;
+		case 24:
+			audio_offset = atol(optarg);
+			break;
+		case 25:
+			if(*optarg == 'a'){pipe_mode = 'A';}
+			else if(*optarg == 'r'){pipe_mode = 'R';}
+			else if(*optarg == 'g'){pipe_mode = 'G';}
+			else if(*optarg == 'b'){pipe_mode = 'B';}
+			else{pipe_mode = *optarg;}
 			break;
 		default:
 			usage();
@@ -945,7 +982,7 @@ int main(int argc, char **argv)
 		usage();
 	}
 	
-	if((sync_a != 'R') && (sync_a != 'G') && (sync_a != 'B') && (sync_a != 0))
+	if((sync_a != 'R') && (sync_a != 'G') && (sync_a != 'B'))
 	{
 		fprintf(stderr, "\nUnknow parametter '%c' for option -syncA / value : (R,r,G,g,B,b)\n\n",sync_a);
 		usage();
@@ -953,7 +990,16 @@ int main(int argc, char **argv)
 	else if(sync_a == 'R'){start_audio = start_r;}
 	else if(sync_a == 'G'){start_audio = start_g;}
 	else if(sync_a == 'B'){start_audio = start_b;}
+	else if(red == 1 && green == 0 && blue == 0){start_audio = start_r; sync_a = 'R';}//select the channel if only 1 is activated
+	else if(red == 0 && green == 1 && blue == 0){start_audio = start_g; sync_a = 'G';}
+	else if(red == 0 && green == 0 && blue == 1){start_audio = start_b; sync_a = 'B';}
 	else {start_audio = start_g; sync_a = 'G';}//default value
+	
+	if((pipe_mode != 'A') && (pipe_mode != 'R') && (pipe_mode != 'G') && (pipe_mode != 'B'))
+	{
+		fprintf(stderr, "\nUnknow parametter '%c' for option -pipeMode / value : (A,a,R,r,G,g,B,b)\n\n",pipe_mode);
+		usage();
+	}
 	
 	if((cmb_mode_r < 0 || cmb_mode_r > 1) || (cmb_mode_g < 0 ||cmb_mode_g > 1) || (cmb_mode_b < 0 || cmb_mode_b > 1))
 	{
@@ -978,14 +1024,14 @@ int main(int argc, char **argv)
 		start_r = start_r * ((709375 + (1135 * tbcR)) * (1 + r16));
 		start_g = start_g * ((709375 + (1135 * tbcB)) * (1 + g16));
 		start_b = start_b * ((709375 + (1135 * tbcG)) * (1 + b16));
-		start_audio = start_audio * ((88200/25) * (1 + b16));
+		start_audio = (start_audio + audio_offset) * ((88200/25) * 2);
 	}
 	else if(samp_rate == 14318181 || samp_rate == 14318170)//NTSC set first frame
 	{
 		start_r = start_r * ((477750 + (910 * tbcR)) * (1 + r16));
 		start_g = start_g * ((477750 + (910 * tbcG)) * (1 + g16));
 		start_b = start_b * ((477750 + (910 * tbcB)) * (1 + b16));
-		start_audio = start_audio * ((88200/30) * (1 + b16));
+		start_audio = (start_audio + audio_offset) * ((88200/30) * 2);
 	}
 	
 //RED
@@ -1258,7 +1304,7 @@ out:
 		}
 	}
 	
-	free(pipe_buf);
+	//free(pipe_buf);
 
 	return 0;
 }
