@@ -103,6 +103,7 @@ target_link_libraries(fl2k_fm libosmo-fl2k_shared
 
 
 if(UNIX)
+target_link_libraries(fl2k_file2 m)
 target_link_libraries(fl2k_test m)
 target_link_libraries(fl2k_fm m)
 endif()

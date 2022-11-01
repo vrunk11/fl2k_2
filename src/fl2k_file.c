@@ -31,13 +31,21 @@
 #include <unistd.h>
 
 #ifndef _WIN32
-#include <unistd.h>
-#define sleep_ms(ms)	usleep(ms*1000)
+	#include <unistd.h>
+	#define sleep_ms(ms)	usleep(ms*1000)
+	#else
+	#include <windows.h>
+	#include <io.h>
+	#include <fcntl.h>
+	#define sleep_ms(ms)	Sleep(ms)
+#endif
+
+#define _FILE_OFFSET_BITS 64
+
+#ifdef _WIN64
+#define FSEEK fseeko64
 #else
-#include <windows.h>
-#include <io.h>
-#include <fcntl.h>
-#define sleep_ms(ms)	Sleep(ms)
+#define FSEEK fseeko
 #endif
 
 #include "osmo-fl2k.h"
@@ -215,7 +223,7 @@ unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long 
 	return (nb_skip * linelength);//multiply for giving the number of byte to skip
 }
 
-int *read_sample_file(void *inpt_color)
+int read_sample_file(void *inpt_color)
 {
 	//parametter
 	void *buffer = NULL;
@@ -463,7 +471,7 @@ int *read_sample_file(void *inpt_color)
 			{
 				if(combine_mode == 0)//default
 				{
-					tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
+					tmp_buf[i] = round((value16 + value16_2)/ 256.0);//convert to 8 bit
 				}
 				else//mode 1
 				{
@@ -724,17 +732,22 @@ int main(int argc, char **argv)
 {
 #ifndef _WIN32
 	struct sigaction sigact, sigign;
+#endif
+
+#ifdef _WIN32 || _WIN64
 	_setmode(_fileno(stdout), O_BINARY);
 	_setmode(_fileno(stdin), O_BINARY);	
 #endif
+
 	int r, opt, i;
 	uint32_t buf_num = 0;
 	int dev_index = 0;
 	void *status;
-	off64_t start_r = 0;
-	off64_t start_g = 0;
-	off64_t start_b = 0;
-	off64_t start_audio = 0;
+
+	uint64_t start_r = 0;
+	uint64_t start_g = 0;
+	uint64_t start_b = 0;
+	uint64_t start_audio = 0;
 
 	//file adress
 	char *filename_r = NULL;
@@ -991,7 +1004,7 @@ if(red == 1)
 		}
 		else
 		{
-			fseeko64(file_r,start_r,0);
+			FSEEK(file_r,start_r,0);
 		}
 	}
 
@@ -1017,7 +1030,7 @@ if(red2 == 1)
 		}
 		else
 		{
-			fseeko64(file2_r,start_r,0);
+			FSEEK(file2_r,start_r,0);
 		}
 	}
 }
@@ -1038,7 +1051,7 @@ if(green == 1)
 		}
 		else
 		{
-			fseeko64(file_g,start_g,0);
+			FSEEK(file_g,start_g,0);
 		}
 	}
 
@@ -1064,7 +1077,7 @@ if(green2 == 1)
 		}
 		else
 		{
-			fseeko64(file2_g,start_g,0);
+			FSEEK(file2_g,start_g,0);
 		}
 	}
 }
@@ -1085,7 +1098,7 @@ if(blue == 1)
 		}
 		else
 		{
-			fseeko64(file_b,start_b,0);
+			FSEEK(file_b,start_b,0);
 		}
 	}
 
@@ -1111,7 +1124,7 @@ if(blue2 == 1)
 		}
 		else
 		{
-			fseeko64(file2_b,start_b,0);
+			FSEEK(file2_b,start_b,0);
 		}
 	}
 }
@@ -1131,7 +1144,7 @@ if(audio == 1)
 		}
 		else
 		{
-			fseeko64(file_audio,start_audio,0);
+			FSEEK(file_audio,start_audio,0);
 		}
 	}
 }
