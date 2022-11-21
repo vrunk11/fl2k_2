@@ -183,9 +183,9 @@ Windows:
 
 You might see this in Linux:
 
-`Allocating 6 zero-copy buffers
-libusb: error [op_dev_mem_alloc] alloc dev mem failed errno 12
-Failed to allocate zero-copy buffer for transfer 4`
+    Allocating 6 zero-copy buffers
+    libusb: error [op_dev_mem_alloc] alloc dev mem failed errno 12
+    Failed to allocate zero-copy buffer for transfer 4
 
 If so then you can then increase your allowed usbfs buffer size with the following command:
 
