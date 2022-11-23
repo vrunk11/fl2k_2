@@ -88,6 +88,11 @@ int r16 = 0;
 int g16 = 0;
 int b16 = 0;
 
+//signed = 1/ unsigned = 0
+int r_sign = 0;
+int g_sign = 0;
+int b_sign = 0;
+
 //if it's a tbc
 int tbcR = 0;
 int tbcG = 0;
@@ -103,6 +108,11 @@ double c_gain_r = 1;
 double c_gain_g = 1;
 double c_gain_b = 1;
 
+//signal gain  (dynamic range)
+double signal_gain_r = 1;
+double signal_gain_g = 1;
+double signal_gain_b = 1;
+
 //combine mode
 int cmb_mode_r = 0;
 int cmb_mode_g = 0;
@@ -115,6 +125,8 @@ int read_mode = 0;//0 = multitthreading / 1 = hybrid (R --> GB) / 2 = hybrid (RG
 char pipe_mode = 'A';
 
 int sample_type = 1;// 1 == signed   0 == unsigned
+
+char video_standard = 0;
 
 uint32_t sample_cnt_r = 0;//used for tbc processing
 uint32_t sample_cnt_g = 0;//used for tbc processing
@@ -146,7 +158,7 @@ void usage(void)
 		"Usage:\n"
 		"\t[-d device_index (default: 0)]\n"
 		"\t[-s samplerate (default: 100 MS/s) you can write(ntsc) or (pal)]\n"
-		"\t[-u Set sample type to unsigned]\n"
+		"\t[-u Set the output sample type of the fl2K to unsigned]\n"
 		"\t[-R filename (use '-' to read from stdin)\n"
 		"\t[-G filename (use '-' to read from stdin)\n"
 		"\t[-B filename (use '-' to read from stdin)\n"
@@ -158,15 +170,27 @@ void usage(void)
 		"\t[-R16 (convert bits 16 to 8)\n"
 		"\t[-G16 (convert bits 16 to 8)\n"
 		"\t[-B16 (convert bits 16 to 8)\n"
+		"\t[-R8 interpret R input as 8 bit\n"
+		"\t[-G8 interpret G input as 8 bit\n"
+		"\t[-B8 interpret B input as 8 bit\n"
+		"\t[-signR interpret R input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
+		"\t[-signG interpret G input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
+		"\t[-signB interpret B input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
 		"\t[-cmbModeR combine mode \ default : 0 \ value = (0 ,1)\n"
 		"\t[-cmbModeG combine mode \ default : 0 \ value = (0 ,1)\n"
 		"\t[-cmbModeB combine mode \ default : 0 \ value = (0 ,1)\n"
 		"\t[-tbcR interpret R as tbc file\n"
 		"\t[-tbcG interpret G as tbc file\n"
 		"\t[-tbcB interpret B as tbc file\n"
+		"\t[-not_tbcR disable tbc processing for input R file\n"
+		"\t[-not_tbcG disable tbc processing for input G file\n"
+		"\t[-not_tbcB disable tbc processing for input B file\n"
 		"\t[-CgainR chroma gain for input R (0.0 to 6.0) (using color burst)\n"
 		"\t[-CgainG chroma gain for input G (0.0 to 6.0) (using color burst)\n"
 		"\t[-CgainB chroma gain for input B (0.0 to 6.0) (using color burst)\n"
+		"\t[-SgainR signal gain for output R (0.5 to 2.0) (clipping white)\n"
+		"\t[-SgainG signal gain for output G (0.5 to 2.0) (clipping white)\n"
+		"\t[-SgainB signal gain for output B (0.5 to 2.0) (clipping white)\n"
 		"\t[-ireR IRE level for input R (-50.0 to +50.0)\n"
 		"\t[-ireG IRE level for input G (-50.0 to +50.0)\n"
 		"\t[-ireB IRE level for input B (-50.0 to +50.0)\n"
@@ -178,6 +202,12 @@ void usage(void)
 		"\t[-readMode (default = 0) option : 0 = multit-threading (RGB) / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)\n"
 	);
 	exit(1);
+}
+
+const char *get_filename_ext(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if(!dot || dot == filename) return "";
+    return dot + 1;
 }
 
 #ifdef _WIN32
@@ -237,11 +267,13 @@ int read_sample_file(void *inpt_color)
 	FILE *streamA = NULL;
 	int istbc = 0;
 	char color = (char *) inpt_color;
-	uint32_t sample_rate = samp_rate;
+	//uint32_t sample_rate = samp_rate;
 	double *chroma_gain = NULL;
 	double *ire_level = NULL;
+	double signal_gain = 1;
 	
 	int is16 = 0;
+	int is_signed = 0;
 	int is_stereo = 0;
 	int combine_mode = 0;
 	int is_sync_a = 0;
@@ -288,6 +320,8 @@ int read_sample_file(void *inpt_color)
 		is_stereo = red2;
 		combine_mode = cmb_mode_r;
 		is16 = r16;
+		is_signed = r_sign;
+		signal_gain = signal_gain_r;
 		if(sync_a == 'R' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
@@ -313,6 +347,8 @@ int read_sample_file(void *inpt_color)
 		is_stereo = green2;
 		combine_mode = cmb_mode_g;
 		is16 = g16;
+		is_signed = g_sign;
+		signal_gain = signal_gain_g;
 		if(sync_a == 'G' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
@@ -338,6 +374,8 @@ int read_sample_file(void *inpt_color)
 		is_stereo = blue2;
 		combine_mode = cmb_mode_b;
 		is16 = b16;
+		is_signed = b_sign;
+		signal_gain = signal_gain_b;
 		if(sync_a == 'B' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
@@ -357,7 +395,7 @@ int read_sample_file(void *inpt_color)
 	const float ire_gain = (ire_new_max / (ire_new_max + ire_add));
 	double ire_tmp = 0;
 	
-	if(sample_rate == 17734475 || sample_rate == 17735845)//PAL multiplied by 2 if input is 16bit
+	if(video_standard == 'P')//PAL value multiplied by 2 if input is 16bit
 	{
 		frame_lengt = 709375 * (1 + is16);
 		line_lengt = 1135 * (1 + is16);
@@ -369,7 +407,7 @@ int read_sample_file(void *inpt_color)
 		audio_frame = ((88200/25) *2);
 		//sample_skip = 4 * (1 + is16);//remove 4 extra sample in pal
 	}
-	else if(sample_rate == 14318181 || sample_rate == 14318170)//NTSC multiplied by 2 if input is 16bit
+	else if(video_standard == 'N')//NTSC value multiplied by 2 if input is 16bit
 	{
 		frame_lengt = 477750 * (1 + is16);
 		line_lengt = 910 * (1 + is16);
@@ -446,11 +484,14 @@ int read_sample_file(void *inpt_color)
 	while((y < buf_size) && !do_exit)
 	{
 		//if we are at then end of the frame skip one line
-		if((*sample_cnt == frame_lengt) && (istbc == 1))
+		if(*sample_cnt == frame_lengt)
 		{
-			//skip 1 line
-			y += line_lengt;
-			*sample_cnt = 0;
+			if(istbc == 1)
+			{
+				//skip 1 line
+				y += line_lengt;
+				*sample_cnt = 0;
+			}
 			
 			//write audio file to stdout only if its not a terminal
 			if(isatty(STDOUT_FILENO) == 0 && is_sync_a)
@@ -489,11 +530,22 @@ int read_sample_file(void *inpt_color)
 			{
 				if(combine_mode == 0)//default
 				{
-					tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
+					if((round((*value16_signed + *value16_2_signed)/ 256.0) + 128) < -128)
+					{
+						tmp_buf[i] = -128;
+					}
+					/*else if((round((*value16_signed + *value16_2_signed)/ 256.0) + 128) > 0)
+					{
+						tmp_buf[i] = 0;
+					}*/
+					else
+					{
+						tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
+					}
 				}
 				else//mode 1
 				{
-					tmp_buf[i] = round(((*value16_signed + *value16_2_signed)/2)/ 256.0);//convert to 8 bit
+					tmp_buf[i] = round(((value16 + value16_2)/2)/ 256.0);//convert to 8 bit
 				}
 				
 			}
@@ -510,7 +562,7 @@ int read_sample_file(void *inpt_color)
 			}
 			else//mode 1
 			{
-				tmp_buf[i] = round((*value8_signed + *value8_2_signed)/2);
+				tmp_buf[i] = round((value8 + value8_2)/2);
 			}
 		}
 		else//no processing
@@ -551,6 +603,23 @@ int read_sample_file(void *inpt_color)
 				ire_tmp = ire_tmp * ire_gain;
 				tmp_buf[i] =  round(ire_tmp + ire_add + ire_min);
 			}
+		}
+		
+		if(tmp_buf[i] > 5)
+		{
+			if((tmp_buf[i] * signal_gain) > 255)
+			{
+				tmp_buf[i] = 255;
+			}
+			else
+			{
+				tmp_buf[i] = round(tmp_buf[i] * signal_gain);
+			}
+		}
+		
+		if(!is_signed)
+		{
+			tmp_buf[i] = tmp_buf[i] - 128;
 		}
 		
 		i += 1;//on avance tmp_buff de 1
@@ -744,6 +813,10 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		}
 	}
 	
+	/*if(!(green == 1 && feof(file_g)) || !(green == 1 && feof(file_g)) && !(green == 1 && feof(file_g)))
+	{
+		
+	}*/
 	/*if(((r <= 0) && (red == 1)) || ((g <= 0)  && (green == 1))|| ((b <= 0) && (blue == 1)))
 	{
 		fl2k_stop_tx(dev);
@@ -766,7 +839,17 @@ int main(int argc, char **argv)
 	uint32_t buf_num = 0;
 	int dev_index = 0;
 	void *status;
-
+	
+	int override_r16 = -1;
+	int override_g16 = -1;
+	int override_b16 = -1;
+	int override_r_sign = -1;
+	int override_g_sign = -1;
+	int override_b_sign = -1;
+	int override_tbc_r = -1;
+	int override_tbc_g = -1;
+	int override_tbc_b = -1;
+	
 	uint64_t start_r = 0;
 	uint64_t start_g = 0;
 	uint64_t start_b = 0;
@@ -823,6 +906,18 @@ int main(int argc, char **argv)
 		{"cmbModeB", 1, 0, 23},
 		{"audioOffset", 1, 0, 24},
 		{"pipeMode", 1, 0, 25},
+		{"SgainR", 1, 0, 26},
+		{"SgainG", 1, 0, 27},
+		{"SgainB", 1, 0, 28},
+		{"R8", 0, 0, 29},
+		{"G8", 0, 0, 30},
+		{"B8", 0, 0, 31},
+		{"not_tbcR", 0, 0, 32},
+		{"not_tbcG", 0, 0, 33},
+		{"not_tbcB", 0, 0, 34},
+		{"signR", 1, 0, 35},
+		{"signG", 1, 0, 36},
+		{"signB", 1, 0, 37},
 		{0, 0, 0, 0}
 	};
 
@@ -868,22 +963,22 @@ int main(int argc, char **argv)
 			filename_audio = optarg;
 			break;
 		case 1:
-			r16 = 1;
+			override_r16 = 1;
 			break;
 		case 2:
-			g16 = 1;
+			override_g16 = 1;
 			break;
 		case 3:
-			b16 = 1;
+			override_b16 = 1;
 			break;
 		case 4:
-			tbcR = 1;
+			override_tbc_r = 1;
 			break;
 		case 5:
-			tbcG = 1;
+			override_tbc_g = 1;
 			break;
 		case 6:
-			tbcB = 1;
+			override_tbc_b = 1;
 			break;
 		case 7:
 			read_mode = (int)atoi(optarg);
@@ -952,6 +1047,48 @@ int main(int argc, char **argv)
 			else if(*optarg == 'b'){pipe_mode = 'B';}
 			else{pipe_mode = *optarg;}
 			break;
+		case 26:
+			signal_gain_r = atof(optarg);
+			break;
+		case 27:
+			signal_gain_g = atof(optarg);
+			break;
+		case 28:
+			signal_gain_b = atof(optarg);
+			break;
+		case 29:
+			override_r16 = 0;
+			break;
+		case 30:
+			override_g16 = 0;
+			break;
+		case 31:
+			override_b16 = 0;
+			break;
+		case 32:
+			override_tbc_r = 0;
+			break;
+		case 33:
+			override_tbc_g = 0;
+			break;
+		case 34:
+			override_tbc_b = 0;
+			break;
+		case 35:
+			if(*optarg == 'u' || *optarg == 'U'){override_r_sign = 0;}
+			else if(*optarg == 's' || *optarg == 'S'){override_r_sign = 1;}
+			else{override_r_sign = atoi(optarg);}
+			break;
+		case 36:
+			if(*optarg == 'u' || *optarg == 'U'){override_g_sign = 0;}
+			else if(*optarg == 's' || *optarg == 'S'){override_g_sign = 1;}
+			else{override_g_sign = atoi(optarg);}
+			break;
+		case 37:
+			if(*optarg == 'u' || *optarg == 'U'){override_b_sign = 0;}
+			else if(*optarg == 's' || *optarg == 'S'){override_b_sign = 1;}
+			else{override_b_sign = atoi(optarg);}
+			break;
 		default:
 			usage();
 			break;
@@ -979,6 +1116,12 @@ int main(int argc, char **argv)
 	if((red == 0 && red2 == 1) || (green == 0 && green2 == 1) || (blue == 0 && blue2 == 1))
 	{
 		fprintf(stderr, "\nNo main file provided using (-R,-G,-B)\n\n");
+		usage();
+	}
+	
+	if((override_r_sign < -1 || override_r_sign > 1) || (override_g_sign < -1 || override_g_sign > 1) || (override_b_sign < -1 || override_b_sign > 1))
+	{
+		fprintf(stderr, "\nInvalid value for one of the option (-signR,-signG,-signB) value : (0,u,1,s)\n\n");
 		usage();
 	}
 	
@@ -1013,25 +1156,33 @@ int main(int argc, char **argv)
 		usage();
 	}
 	
+	if((signal_gain_r < 0.5 || signal_gain_r > 2) || (signal_gain_g < 0.5 || signal_gain_g > 2) || (signal_gain_b < 0.5 || signal_gain_b > 2))
+	{
+		fprintf(stderr, "\nOne signal gain is invalid / range : (0.0 ,4.0)\n\n");
+		usage();
+	}
+	
 	if((ire_r < -50 || ire_r > 50) || (ire_g < -50 || ire_g > 50) || (ire_b < -50 || ire_b > 50))
 	{
 		fprintf(stderr, "\nIRE level is invalid / range : (-50.0 , 50.0)\n\n");
 		usage();
 	}
 	
-	if(samp_rate == 17734475 || samp_rate == 17735845)//PAL set first frame
+	if(samp_rate == 17734475 || samp_rate == 17735845)//PAL
 	{
-		start_r = start_r * ((709375 + (1135 * tbcR)) * (1 + r16));
+		start_r = start_r * ((709375 + (1135 * tbcR)) * (1 + r16));// set first frame
 		start_g = start_g * ((709375 + (1135 * tbcB)) * (1 + g16));
 		start_b = start_b * ((709375 + (1135 * tbcG)) * (1 + b16));
 		start_audio = (start_audio + audio_offset) * ((88200/25) * 2);
+		video_standard = 'P';
 	}
-	else if(samp_rate == 14318181 || samp_rate == 14318170)//NTSC set first frame
+	else if(samp_rate == 14318181 || samp_rate == 14318170)//NTSC
 	{
-		start_r = start_r * ((477750 + (910 * tbcR)) * (1 + r16));
+		start_r = start_r * ((477750 + (910 * tbcR)) * (1 + r16));//set first frame
 		start_g = start_g * ((477750 + (910 * tbcG)) * (1 + g16));
 		start_b = start_b * ((477750 + (910 * tbcB)) * (1 + b16));
 		start_audio = (start_audio + audio_offset) * ((88200/30) * 2);
+		video_standard = 'N';
 	}
 	
 //RED
@@ -1052,6 +1203,19 @@ if(red == 1)
 		{
 			FSEEK(file_r,start_r,0);
 		}
+		
+		if(!strcmp(get_filename_ext(filename_r),"tbc")){r16 = 1;r_sign = 0;tbcR = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"s8")){r16 = 0;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"u8")){r16 = 0;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"s16")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"u16")){r16 = 1;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"wav")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"pcm")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"efm")){r16 = 0;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"raw")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"r8")){r16 = 0;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"r16")){r16 = 1;r_sign = 0;}
+		//else if(!strcmp(get_filename_ext(filename_r),"cds")){r16 = 1;r_sign = 0;}//10 bit packed
 	}
 
 	txbuf_r = malloc(FL2K_BUF_LEN);
@@ -1106,6 +1270,19 @@ if(green == 1)
 		fprintf(stderr, "(GREEN) : malloc error!\n");
 		goto out;
 	}
+	
+	if(!strcmp(get_filename_ext(filename_g),"tbc")){g16 = 1;g_sign = 0;tbcG = 1;}
+	else if(!strcmp(get_filename_ext(filename_g),"s8")){g16 = 0;g_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_g),"u8")){g16 = 0;g_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_g),"s16")){g16 = 1;g_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_g),"u16")){g16 = 1;g_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_g),"wav")){g16 = 1;g_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_g),"pcm")){g16 = 1;g_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_g),"efm")){g16 = 0;g_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_g),"raw")){g16 = 1;g_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_g),"r8")){g16 = 0;g_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_g),"r16")){g16 = 1;g_sign = 0;}
+	//else if(!strcmp(get_filename_ext(filename_g),"cds")){g16 = 1;g_sign = 0;}
 }
 
 if(green2 == 1)
@@ -1153,6 +1330,19 @@ if(blue == 1)
 		fprintf(stderr, "(BLUE) : malloc error!\n");
 		goto out;
 	}
+	
+	if(!strcmp(get_filename_ext(filename_b),"tbc")){b16 = 1;b_sign = 0;tbcB = 1;}
+	else if(!strcmp(get_filename_ext(filename_b),"s8")){b16 = 0;b_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_b),"u8")){b16 = 0;b_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_b),"s16")){b16 = 1;b_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_b),"u16")){b16 = 1;b_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_b),"wav")){b16 = 1;b_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_b),"pcm")){b16 = 1;b_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_b),"efm")){b16 = 0;b_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_b),"raw")){b16 = 1;b_sign = 1;}
+	else if(!strcmp(get_filename_ext(filename_b),"r8")){b16 = 0;b_sign = 0;}
+	else if(!strcmp(get_filename_ext(filename_b),"r16")){b16 = 1;b_sign = 0;}
+	//else if(!strcmp(get_filename_ext(filename_b),"cds")){b16 = 1;b_sign = 0;}
 }
 
 if(blue2 == 1)
@@ -1194,6 +1384,21 @@ if(audio == 1)
 		}
 	}
 }
+
+//16bit override
+if(override_r16 != -1){r16 = override_r16;}
+if(override_g16 != -1){g16 = override_g16;}
+if(override_b16 != -1){b16 = override_b16;}
+
+//tbc override
+if(override_tbc_r != -1){tbcR = override_tbc_r;}
+if(override_tbc_g != -1){tbcG = override_tbc_g;}
+if(override_tbc_b != -1){tbcB = override_tbc_b;}
+
+//sign override
+if(override_r_sign != -1){r_sign = override_r_sign;}
+if(override_g_sign != -1){g_sign = override_g_sign;}
+if(override_b_sign != -1){b_sign = override_b_sign;}
 
 //next
 
