@@ -543,7 +543,7 @@ int read_sample_file(void *inpt_color)
 						tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
 					}
 				}
-				if(combine_mode == 2)//default
+				else if(combine_mode == 2)//default
 				{
 					if(((*line_sample_cnt >= v_start) && (*line_sample_cnt <= v_end))&& *line_cnt > (22 + ((unsigned long)*field_cnt % 2)) )
 					{
