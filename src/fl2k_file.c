@@ -176,9 +176,9 @@ void usage(void)
 		"\t[-signR interpret R input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
 		"\t[-signG interpret G input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
 		"\t[-signB interpret B input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
-		"\t[-cmbModeR combine mode \ default : 0 \ value = (0 ,1)\n"
-		"\t[-cmbModeG combine mode \ default : 0 \ value = (0 ,1)\n"
-		"\t[-cmbModeB combine mode \ default : 0 \ value = (0 ,1)\n"
+		"\t[-cmbModeR combine mode \ default : 0 \ value = (0 ,1 ,2)\n"
+		"\t[-cmbModeG combine mode \ default : 0 \ value = (0 ,1 ,2)\n"
+		"\t[-cmbModeB combine mode \ default : 0 \ value = (0 ,1 ,2)\n"
 		"\t[-tbcR interpret R as tbc file\n"
 		"\t[-tbcG interpret G as tbc file\n"
 		"\t[-tbcB interpret B as tbc file\n"
@@ -542,6 +542,18 @@ int read_sample_file(void *inpt_color)
 					{
 						tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
 					}
+				}
+				if(combine_mode == 2)//default
+				{
+					if(((*line_sample_cnt >= v_start) && (*line_sample_cnt <= v_end))&& *line_cnt > (22 + ((unsigned long)*field_cnt % 2)) )
+					{
+						tmp_buf[i] = round(round((value16)  / 256.0) / 1.34) + 64;//convert to 8 bit
+					}
+					else
+					{
+						tmp_buf[i] = round(value16_2 / 256.0);//convert to 8 bit
+					}
+					
 				}
 				else//mode 1
 				{
@@ -1144,9 +1156,9 @@ int main(int argc, char **argv)
 		usage();
 	}
 	
-	if((cmb_mode_r < 0 || cmb_mode_r > 1) || (cmb_mode_g < 0 ||cmb_mode_g > 1) || (cmb_mode_b < 0 || cmb_mode_b > 1))
+	if((cmb_mode_r < 0 || cmb_mode_r > 2) || (cmb_mode_g < 0 ||cmb_mode_g > 2) || (cmb_mode_b < 0 || cmb_mode_b > 2))
 	{
-		fprintf(stderr, "\nCombine mode invalid / value : (0 ,1)\n\n");
+		fprintf(stderr, "\nCombine mode invalid / value : (0 ,1 ,2)\n\n");
 		usage();
 	}
 	
