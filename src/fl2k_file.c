@@ -113,6 +113,19 @@ double signal_gain_r = 1;
 double signal_gain_g = 1;
 double signal_gain_b = 1;
 
+//Voltage control
+double v_max_r = -1;
+double v_max_g = -1;
+double v_max_b = -1;
+
+int max_value_r = 255;
+int max_value_g = 255;
+int max_value_b = 255;
+
+int min_value_r = 0;
+int min_value_g = 0;
+int min_value_b = 0;
+
 //combine mode
 int cmb_mode_r = 0;
 int cmb_mode_g = 0;
@@ -191,6 +204,15 @@ void usage(void)
 		"\t[-SgainR signal gain for output R (0.5 to 2.0) (clipping white)\n"
 		"\t[-SgainG signal gain for output G (0.5 to 2.0) (clipping white)\n"
 		"\t[-SgainB signal gain for output B (0.5 to 2.0) (clipping white)\n"
+		"\t[-VmaxR maximum output voltage for channel R (0.003 to 0.7) (scale value) (disable Cgain and Sgain)\n"
+		"\t[-VmaxG maximum output voltage for channel G (0.003 to 0.7) (scale value) (disable Cgain and Sgain)\n"
+		"\t[-VmaxB maximum output voltage for channel B (0.003 to 0.7) (scale value) (disable Cgain and Sgain)\n"
+		"\t[-MaxValueR max value for channel R (1 to 255) (reference level) (used for Vmax)\n"
+		"\t[-MaxValueG max value for channel G (1 to 255) (reference level) (used for Vmax)\n"
+		"\t[-MaxValueB max value for channel B (1 to 255) (reference level) (used for Vmax)\n"
+		//"\t[-MinValueR min value for channel R (0 to 254) (reference level) (used for Vmax)\n"
+		//"\t[-MinValueG min value for channel G (0 to 254) (reference level) (used for Vmax)\n"
+		//"\t[-MinValueB min value for channel B (0 to 254) (reference level) (used for Vmax)\n"
 		"\t[-ireR IRE level for input R (-50.0 to +50.0)\n"
 		"\t[-ireG IRE level for input G (-50.0 to +50.0)\n"
 		"\t[-ireB IRE level for input B (-50.0 to +50.0)\n"
@@ -271,6 +293,8 @@ int read_sample_file(void *inpt_color)
 	double *chroma_gain = NULL;
 	double *ire_level = NULL;
 	double signal_gain = 1;
+	double v_max = -1;
+	int max_value = 255;
 	
 	int is16 = 0;
 	int is_signed = 0;
@@ -322,6 +346,8 @@ int read_sample_file(void *inpt_color)
 		is16 = r16;
 		is_signed = r_sign;
 		signal_gain = signal_gain_r;
+		v_max = v_max_r;
+		max_value = max_value_r;
 		if(sync_a == 'R' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
@@ -349,6 +375,8 @@ int read_sample_file(void *inpt_color)
 		is16 = g16;
 		is_signed = g_sign;
 		signal_gain = signal_gain_g;
+		v_max = v_max_g;
+		max_value = max_value_g;
 		if(sync_a == 'G' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
@@ -376,6 +404,8 @@ int read_sample_file(void *inpt_color)
 		is16 = b16;
 		is_signed = b_sign;
 		signal_gain = signal_gain_b;
+		v_max = v_max_b;
+		max_value = max_value_b;
 		if(sync_a == 'B' && pipe_mode == 'A')
 		{
 			is_sync_a = 1;
@@ -582,7 +612,7 @@ int read_sample_file(void *inpt_color)
 			tmp_buf[i] = value8;
 		}
 		
-		if(*chroma_gain != 0)
+		if(*chroma_gain != 1)
 		{
 			//color burst reading
 			if(((*line_sample_cnt >= cbust_start) && (*line_sample_cnt <= cbust_end)) && (*line_cnt == (21 + ((unsigned long)*field_cnt % 2))))
@@ -617,15 +647,32 @@ int read_sample_file(void *inpt_color)
 			}
 		}
 		
-		if(tmp_buf[i] > 5)
+		//signal gain
+		if(signal_gain != 1)
 		{
-			if((tmp_buf[i] * signal_gain) > 255)
+			if(tmp_buf[i] > 5)
+			{
+				if((tmp_buf[i] * signal_gain) > 255)
+				{
+					tmp_buf[i] = 255;
+				}
+				else
+				{
+					tmp_buf[i] = round(tmp_buf[i] * signal_gain);
+				}
+			}
+		}
+		
+		//scale to max voltage
+		if(v_max > 0.0)
+		{
+			if(round(tmp_buf[i]*(255/max_value)) > 255)
 			{
 				tmp_buf[i] = 255;
 			}
 			else
 			{
-				tmp_buf[i] = round(tmp_buf[i] * signal_gain);
+				tmp_buf[i] = round((tmp_buf[i]*(255/max_value))/(0.7/v_max));
 			}
 		}
 		
@@ -930,7 +977,13 @@ int main(int argc, char **argv)
 		{"signR", 1, 0, 35},
 		{"signG", 1, 0, 36},
 		{"signB", 1, 0, 37},
-		{0, 0, 0, 0}
+		{"VmaxR", 1, 0, 38},
+		{"VmaxG", 1, 0, 39},
+		{"VmaxB", 1, 0, 40},
+		{"MaxValueR", 1, 0, 41},
+		{"MaxValueG", 1, 0, 42},
+		{"MaxValueB", 1, 0, 43},
+		{0, 0, 0, 0}//reminder : letter value are from 65 to 122
 	};
 
 	while ((opt = getopt_long_only(argc, argv, "d:r:s:uR:G:B:A:",long_options, &option_index)) != -1) {
@@ -1101,6 +1154,24 @@ int main(int argc, char **argv)
 			else if(*optarg == 's' || *optarg == 'S'){override_b_sign = 1;}
 			else{override_b_sign = atoi(optarg);}
 			break;
+		case 38:
+			v_max_r = atof(optarg);
+			break;
+		case 39:
+			v_max_g = atof(optarg);
+			break;
+		case 40:
+			v_max_b = atof(optarg);
+			break;
+		case 41:
+			max_value_r = atoi(optarg);
+			break;
+		case 42:
+			max_value_g = atoi(optarg);
+			break;
+		case 43:
+			max_value_b = atoi(optarg);
+			break;
 		default:
 			usage();
 			break;
@@ -1178,6 +1249,42 @@ int main(int argc, char **argv)
 	{
 		fprintf(stderr, "\nIRE level is invalid / range : (-50.0 , 50.0)\n\n");
 		usage();
+	}
+	
+	if(((v_max_r < 0.003 || v_max_r > 0.7) && v_max_r != -1)|| ((v_max_g < 0.003 || v_max_g > 0.7) && v_max_g != -1) || ((v_max_b < 0.003 || v_max_b > 0.7) && v_max_b != -1))
+	{
+		fprintf(stderr, "\n maximum voltage (%f) is invalid / range : (0.003 , 0.7)\n\n",v_max_g);
+		usage();
+	}
+	
+	if((max_value_r < 1 || max_value_r > 255) || (max_value_g < 1 || max_value_g > 255) || (max_value_b < 1 || max_value_b > 255))
+	{
+		fprintf(stderr, "\n max value is invalid / range : (1 , 255)\n\n");
+		usage();
+	}
+	
+	if(v_max_r > 0.0)
+	{
+		fprintf(stderr, "\nGain and ire control disabled for output R\n\n");
+		c_gain_r = 1;
+		signal_gain_r = 1;
+		ire_r = 0;
+	}
+	
+	if(v_max_g > 0.0)
+	{
+		fprintf(stderr, "\nGain and ire control disabled for output G\n\n");
+		c_gain_g = 1;
+		signal_gain_g = 1;
+		ire_g = 0;
+	}
+	
+	if(v_max_b > 0.0)
+	{
+		fprintf(stderr, "\nGain and ire control disabled for output B\n\n");
+		c_gain_b = 1;
+		signal_gain_b = 1;
+		ire_b = 0;
 	}
 	
 	if(samp_rate == 17734475 || samp_rate == 17735845)//PAL
