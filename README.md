@@ -12,13 +12,13 @@ A Simple TBC playback utility, currently only CLI (Command Line Interface)
 
 This will later be both GUI/CLI.
 
-## What is a TBC? 
+## What is a TBC?
 
 Its a digital Time Base Corrected lossless 16-bit video file thats in 1 file for Composite streams and 2 files for S-Video streams.
 
-## How do I get a TBC file? 
+## How do I get a TBC file?
 
-Via [VHS-Decode](https://github.com/oyvindln/vhs-decode) (Tape Decoding) and [LD-Decode](https://github.com/happycube/ld-decode) (LaserDisk Decoding) or [CVBS-Decode](https://github.com/oyvindln/vhs-decode/wiki/CVBS-Composite-Decode) (Composite Decoding) 
+Via [VHS-Decode](https://github.com/oyvindln/vhs-decode) (Tape Decoding) and [LD-Decode](https://github.com/happycube/ld-decode) (LaserDisk Decoding) or [CVBS-Decode](https://github.com/oyvindln/vhs-decode/wiki/CVBS-Composite-Decode) (Composite Decoding)
 
 ## Ware you can buy the FL2K and adapters
 
@@ -28,43 +28,53 @@ VGA to RCA [Aliexpress](https://www.aliexpress.com/item/1005002872152601.html?)
 
 VGA to BNC Male/Female [Amazon UK](https://www.amazon.co.uk/gp/product/B0033AF5Y0/) / [Amazon USA](https://www.amazon.com/s?k=VGA+to+BNC+Cable&crid=30JGI1TOFQ5I9&sprefix=vga+to+bnc+cable%2Caps%2C165&ref=nb_sb_noss_1)
 
-# Setup 
+# Setup
 
-## Standardised Cable Config 
+## Standardised Cable Config
 
-### Composite 
+### Composite
 
 Red - Right Audio
 
 Blue - Left Audio
 
-Green - Composite Video 
+Green - Composite Video
 
-### S-Video 
+### S-Video
 
-Green - Lumanace Y 
+Green - Lumanace Y
 
-Blue - Chroma C 
+Blue - Chroma C
 
 Red - Mono/Mono Mix Audio
 
-## Windows 
+## Windows
+
+Download and install the stock driver [FL2000 Stock Driver](https://github.com/vrunk11/fl2k_2/fl2k_2/resources/FL2000-Driver-2.1.33676.0.exe)
+
+Then select and replace the driver with libusb-win32 (v1.2.6.0) using [Zagig Driver Tool](https://github.com/vrunk11/fl2k_2/fl2k_2/resources/zadig-2.7.exe)
 
 Simply download the latest [Windows Release](https://github.com/vrunk11/fl2k_2/releases).
 
 Decompress the .zip file.
 
-For GUI users 
+For GUI users
 
 Open the fl2k_2.bat file.
 
-For CLI users 
+For CLI users
 
-Open an CMD Window and open the directory with CD once inside simply use fl2k-tbc-player.exe to open the software.
+Open an CMD Window and then open the directory your files are in, copy the path and add cd to the start example:
+
+    cd C:\Users\harry\Desktop\fl2k
+
+Once inside use arguments as stated below example:
+
+    fl2k-2.exe -u -s pal -G16 -tbcG -G example.tbc
 
 ## Linux
 
-### Download Dependencies 
+### Download Dependencies
 
 `sudo apt-get install libusb-1.0-0-dev`
 
@@ -85,27 +95,27 @@ Before being able to use the device as a non-root user, the udev rules need to b
 
 `sudo udevadm trigger`
 
-### Download The Player 
+### Download The Player
 
 `git clone https://github.com/vrunk11/fl2k_2/.git fl2k-tbc-player`
 
-To enter into the install directory use CD 
+To enter into the install directory use CD
 
 `cd fl2k-tbc-player`
 
-Compile the player with 
+Compile the player with
 
 `sudo compile.sh`
 
-Run the software with 
+Run the software with
 
 `./fl2k_2 [arguments]`
 
-## MacOS 
+## MacOS
 
 Support yet to be Implimented.
 
-# Usage 
+# Usage
 
 As its an VGA R-G-B adapter so there is 3 ADC's
 
@@ -115,7 +125,7 @@ For the Samplerate/TV System you can do `-s ntsc` or `-s pal`
 
 Currently to make tbc playback possible you need to do the 16 to 8 bit conversion with:
 
--R16 for red -G16 for green -B16 for blue 
+-R16 for red -G16 for green -B16 for blue
 
 Also needed is removal of the extra line on each frame:
 
@@ -123,7 +133,7 @@ Also needed is removal of the extra line on each frame:
 
 ## Standard Oprational Commands
 
-For windows just use fl2k_2.exe 
+For windows just use fl2k_2.exe
 
 ### Composite output on the red channel:
 
