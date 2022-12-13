@@ -1286,6 +1286,67 @@ int main(int argc, char **argv)
 		signal_gain_b = 1;
 		ire_b = 0;
 	}
+
+	if(red == 1)
+	{
+		if(!strcmp(get_filename_ext(filename_r),"tbc")){r16 = 1;r_sign = 0;tbcR = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"s8")){r16 = 0;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"u8")){r16 = 0;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"s16")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"u16")){r16 = 1;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"wav")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"pcm")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"efm")){r16 = 0;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"raw")){r16 = 1;r_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_r),"r8")){r16 = 0;r_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_r),"r16")){r16 = 1;r_sign = 0;}
+		//else if(!strcmp(get_filename_ext(filename_r),"cds")){r16 = 1;r_sign = 0;}//10 bit packed
+	}	
+	if(green == 1)
+	{
+		if(!strcmp(get_filename_ext(filename_g),"tbc")){g16 = 1;g_sign = 0;tbcG = 1;}
+		else if(!strcmp(get_filename_ext(filename_g),"s8")){g16 = 0;g_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_g),"u8")){g16 = 0;g_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_g),"s16")){g16 = 1;g_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_g),"u16")){g16 = 1;g_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_g),"wav")){g16 = 1;g_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_g),"pcm")){g16 = 1;g_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_g),"efm")){g16 = 0;g_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_g),"raw")){g16 = 1;g_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_g),"r8")){g16 = 0;g_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_g),"r16")){g16 = 1;g_sign = 0;}
+		//else if(!strcmp(get_filename_ext(filename_g),"cds")){g16 = 1;g_sign = 0;}
+	}
+	if(blue == 1)
+	{
+		if(!strcmp(get_filename_ext(filename_b),"tbc")){b16 = 1;b_sign = 0;tbcB = 1;}
+		else if(!strcmp(get_filename_ext(filename_b),"s8")){b16 = 0;b_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_b),"u8")){b16 = 0;b_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_b),"s16")){b16 = 1;b_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_b),"u16")){b16 = 1;b_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_b),"wav")){b16 = 1;b_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_b),"pcm")){b16 = 1;b_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_b),"efm")){b16 = 0;b_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_b),"raw")){b16 = 1;b_sign = 1;}
+		else if(!strcmp(get_filename_ext(filename_b),"r8")){b16 = 0;b_sign = 0;}
+		else if(!strcmp(get_filename_ext(filename_b),"r16")){b16 = 1;b_sign = 0;}
+		//else if(!strcmp(get_filename_ext(filename_b),"cds")){b16 = 1;b_sign = 0;}
+	}
+	
+	//16bit override
+	if(override_r16 != -1){r16 = override_r16;}
+	if(override_g16 != -1){g16 = override_g16;}
+	if(override_b16 != -1){b16 = override_b16;}
+
+	//tbc override
+	if(override_tbc_r != -1){tbcR = override_tbc_r;}
+	if(override_tbc_g != -1){tbcG = override_tbc_g;}
+	if(override_tbc_b != -1){tbcB = override_tbc_b;}
+
+	//sign override
+	if(override_r_sign != -1){r_sign = override_r_sign;}
+	if(override_g_sign != -1){g_sign = override_g_sign;}
+	if(override_b_sign != -1){b_sign = override_b_sign;}
 	
 	if(samp_rate == 17734475 || samp_rate == 17735845)//PAL
 	{
@@ -1304,7 +1365,7 @@ int main(int argc, char **argv)
 		video_standard = 'N';
 	}
 	
-//RED
+//RED file
 if(red == 1)
 {
 	if (strcmp(filename_r, "-") == 0)/* Read samples from stdin */
@@ -1322,19 +1383,6 @@ if(red == 1)
 		{
 			FSEEK(file_r,start_r,0);
 		}
-		
-		if(!strcmp(get_filename_ext(filename_r),"tbc")){r16 = 1;r_sign = 0;tbcR = 1;}
-		else if(!strcmp(get_filename_ext(filename_r),"s8")){r16 = 0;r_sign = 1;}
-		else if(!strcmp(get_filename_ext(filename_r),"u8")){r16 = 0;r_sign = 0;}
-		else if(!strcmp(get_filename_ext(filename_r),"s16")){r16 = 1;r_sign = 1;}
-		else if(!strcmp(get_filename_ext(filename_r),"u16")){r16 = 1;r_sign = 0;}
-		else if(!strcmp(get_filename_ext(filename_r),"wav")){r16 = 1;r_sign = 1;}
-		else if(!strcmp(get_filename_ext(filename_r),"pcm")){r16 = 1;r_sign = 1;}
-		else if(!strcmp(get_filename_ext(filename_r),"efm")){r16 = 0;r_sign = 0;}
-		else if(!strcmp(get_filename_ext(filename_r),"raw")){r16 = 1;r_sign = 1;}
-		else if(!strcmp(get_filename_ext(filename_r),"r8")){r16 = 0;r_sign = 0;}
-		else if(!strcmp(get_filename_ext(filename_r),"r16")){r16 = 1;r_sign = 0;}
-		//else if(!strcmp(get_filename_ext(filename_r),"cds")){r16 = 1;r_sign = 0;}//10 bit packed
 	}
 
 	txbuf_r = malloc(FL2K_BUF_LEN);
@@ -1364,7 +1412,7 @@ if(red2 == 1)
 	}
 }
 
-//GREEN
+//GREEN file
 if(green == 1)
 {
 	if (strcmp(filename_g, "-") == 0)/* Read samples from stdin */
@@ -1389,19 +1437,6 @@ if(green == 1)
 		fprintf(stderr, "(GREEN) : malloc error!\n");
 		goto out;
 	}
-	
-	if(!strcmp(get_filename_ext(filename_g),"tbc")){g16 = 1;g_sign = 0;tbcG = 1;}
-	else if(!strcmp(get_filename_ext(filename_g),"s8")){g16 = 0;g_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_g),"u8")){g16 = 0;g_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_g),"s16")){g16 = 1;g_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_g),"u16")){g16 = 1;g_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_g),"wav")){g16 = 1;g_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_g),"pcm")){g16 = 1;g_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_g),"efm")){g16 = 0;g_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_g),"raw")){g16 = 1;g_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_g),"r8")){g16 = 0;g_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_g),"r16")){g16 = 1;g_sign = 0;}
-	//else if(!strcmp(get_filename_ext(filename_g),"cds")){g16 = 1;g_sign = 0;}
 }
 
 if(green2 == 1)
@@ -1424,7 +1459,7 @@ if(green2 == 1)
 	}
 }
 
-//BLUE
+//BLUE file
 if(blue == 1)
 {
 	if (strcmp(filename_b, "-") == 0)/* Read samples from stdin */
@@ -1449,19 +1484,6 @@ if(blue == 1)
 		fprintf(stderr, "(BLUE) : malloc error!\n");
 		goto out;
 	}
-	
-	if(!strcmp(get_filename_ext(filename_b),"tbc")){b16 = 1;b_sign = 0;tbcB = 1;}
-	else if(!strcmp(get_filename_ext(filename_b),"s8")){b16 = 0;b_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_b),"u8")){b16 = 0;b_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_b),"s16")){b16 = 1;b_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_b),"u16")){b16 = 1;b_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_b),"wav")){b16 = 1;b_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_b),"pcm")){b16 = 1;b_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_b),"efm")){b16 = 0;b_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_b),"raw")){b16 = 1;b_sign = 1;}
-	else if(!strcmp(get_filename_ext(filename_b),"r8")){b16 = 0;b_sign = 0;}
-	else if(!strcmp(get_filename_ext(filename_b),"r16")){b16 = 1;b_sign = 0;}
-	//else if(!strcmp(get_filename_ext(filename_b),"cds")){b16 = 1;b_sign = 0;}
 }
 
 if(blue2 == 1)
@@ -1503,21 +1525,6 @@ if(audio == 1)
 		}
 	}
 }
-
-//16bit override
-if(override_r16 != -1){r16 = override_r16;}
-if(override_g16 != -1){g16 = override_g16;}
-if(override_b16 != -1){b16 = override_b16;}
-
-//tbc override
-if(override_tbc_r != -1){tbcR = override_tbc_r;}
-if(override_tbc_g != -1){tbcG = override_tbc_g;}
-if(override_tbc_b != -1){tbcB = override_tbc_b;}
-
-//sign override
-if(override_r_sign != -1){r_sign = override_r_sign;}
-if(override_g_sign != -1){g_sign = override_g_sign;}
-if(override_b_sign != -1){b_sign = override_b_sign;}
 
 //next
 
