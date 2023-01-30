@@ -20,6 +20,8 @@ Its a digital Time Base Corrected lossless 16-bit video file thats in 1 file for
 
 Via [VHS-Decode](https://github.com/oyvindln/vhs-decode) (Tape Decoding) and [LD-Decode](https://github.com/happycube/ld-decode) (LaserDisk Decoding) or [CVBS-Decode](https://github.com/oyvindln/vhs-decode/wiki/CVBS-Composite-Decode) (Composite Decoding)
 
+### You can also genarate an TBC file from normal video using [ld-chroma-encoder](https://github.com/happycube/ld-decode/wiki/ld-chroma-encoder)
+
 ## Ware you can buy the FL2K and adapters
 
 The FL2K [Link 1](https://www.aliexpress.com/item/1005002872152601.html?) / [Link 2](https://www.reichelt.de/de/de/adapterkabel-usb-3-0-stecker-vga-buchse-schwarz-delock-62738-p287335.html)
