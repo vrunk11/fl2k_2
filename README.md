@@ -5,6 +5,7 @@ Turns FL2000-based USB 3.0 to VGA adapters into low cost DACs.
 For more information on sorce see https://osmocom.org/projects/osmo-fl2k/wiki
 
 This project fork is primarily for use with playing TBC files the following is for that use case.
+but it can also be used as a remplacement of the osmos-fl2K thanks to all the new QOL feature added.
 
 # FL2K TBC Player
 
