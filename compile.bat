@@ -18,5 +18,7 @@ pause
 mkdir build
 cd build
 cmake -G "MinGW Makefiles" ../ -DINSTALL_UDEV_RULES=ON
-make -j 3
+start ../make.exe -j 3
+cd src
+start .
 pause
