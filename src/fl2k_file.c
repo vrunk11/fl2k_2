@@ -254,7 +254,7 @@ static void sighandler(int signum)
 #endif
 
 //compute number of sample to skip
-unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long bufsize)
+unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long bufsize,char standard)
 {
 	int nb_skip = 0;
 	
@@ -277,6 +277,12 @@ unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long 
 			nb_skip ++;
 		}
 	}
+	
+	if(standard == 'P')
+	{
+		linelength -= 8;//remove the 4 extra sample from the last line
+	}
+	
 	return (nb_skip * linelength);//multiply for giving the number of byte to skip
 }
 
@@ -427,7 +433,7 @@ int read_sample_file(void *inpt_color)
 	
 	if(video_standard == 'P')//PAL value multiplied by 2 if input is 16bit
 	{
-		frame_lengt = 709375 * (1 + is16);
+		frame_lengt = 709379 * (1 + is16);//709375 + 4 extra sample
 		line_lengt = 1135 * (1 + is16);
 		frame_nb_line = 625;
 		v_start = 185 * (1 + is16);
@@ -451,9 +457,9 @@ int read_sample_file(void *inpt_color)
 	
 	unsigned long buf_size = (1310720 + (is16 * 1310720));
 	
-	if(istbc == 1)
+	if(istbc == 1)//compute buf size
 	{
-		sample_skip += calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
+		sample_skip += calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size,video_standard);
 	}
 	
 	buf_size += sample_skip;
@@ -483,7 +489,7 @@ int read_sample_file(void *inpt_color)
 	
 	if(istbc == 1)
 	{
-		sample_skip = calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size);
+		sample_skip = calc_nb_skip(*sample_cnt,line_lengt,frame_lengt,buf_size,video_standard);
 	}
 	
 	if(is_stereo)
@@ -512,14 +518,22 @@ int read_sample_file(void *inpt_color)
 	}
 
 	while((y < buf_size) && !do_exit)
-	{
+	{	
 		//if we are at then end of the frame skip one line
-		if(*sample_cnt == frame_lengt)
+		if(*sample_cnt >= frame_lengt)
 		{
 			if(istbc == 1)
 			{
-				//skip 1 line
-				y += line_lengt;
+				if(video_standard == 'P')
+				{
+					//skip 1 line - 4 sample
+					y += (line_lengt - 8);
+				}
+				else
+				{
+					//skip 1 line
+					y += line_lengt;
+				}
 				*sample_cnt = 0;
 			}
 			
@@ -573,7 +587,7 @@ int read_sample_file(void *inpt_color)
 						tmp_buf[i] = round((*value16_signed + *value16_2_signed)/ 256.0) + 128;//convert to 8 bit
 					}
 				}
-				else if(combine_mode == 2)//default
+				else if(combine_mode == 2)
 				{
 					if(((*line_sample_cnt >= v_start) && (*line_sample_cnt <= v_end))&& *line_cnt > (22 + ((unsigned long)*field_cnt % 2)) )
 					{
