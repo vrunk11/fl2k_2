@@ -455,7 +455,7 @@ int read_sample_file(void *inpt_color)
 		audio_frame = ((88200/30) * 2);
 	}
 	
-	unsigned long buf_size = (1310720 + (is16 * 1310720));
+	unsigned long buf_size = (FL2K_BUF_LEN + (is16 * FL2K_BUF_LEN));
 	
 	if(istbc == 1)//compute buf size
 	{
@@ -464,7 +464,7 @@ int read_sample_file(void *inpt_color)
 	
 	buf_size += sample_skip;
 	
-	unsigned char *tmp_buf = malloc(1310720);
+	unsigned char *tmp_buf = malloc(FL2K_BUF_LEN);
 	unsigned char *audio_buf = malloc(audio_frame);
 	char *audio_buf_signed = (void *)audio_buf;
 	unsigned char *calc = malloc(buf_size);
@@ -540,7 +540,7 @@ int read_sample_file(void *inpt_color)
 			//write audio file to stdout only if its not a terminal
 			if(isatty(STDOUT_FILENO) == 0 && is_sync_a)
 			{
-				//write(stdout, tmp_buf, 1310720);
+				//write(stdout, tmp_buf, FL2K_BUF_LEN);
 				fread(audio_buf_signed,audio_frame,1,streamA);
 				//write(stdout, audio_buf_signed, audio_frame);
 				fwrite(audio_buf, audio_frame,1,stdout);
@@ -716,10 +716,10 @@ int read_sample_file(void *inpt_color)
 		*line_sample_cnt += (1 + is16);
 	}
 	
-	memcpy(buffer, tmp_buf, 1310720);
+	memcpy(buffer, tmp_buf, FL2K_BUF_LEN);
 	if(isatty(STDOUT_FILENO) == 0 && use_pipe)
 	{
-		fwrite(tmp_buf, 1310720,1,stdout);
+		fwrite(tmp_buf, FL2K_BUF_LEN,1,stdout);
 		fflush(stdout);
 	}
 	
@@ -761,7 +761,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	//set sign (signed = 1 , unsigned = 0)
 	data_info->sampletype_signed = sample_type;
 	
-	//send the bufer with a size of 1310720
+	//send the bufer with a size of (1280 * 1024) = 1310720
 	if(red == 1)
 	{
 		data_info->r_buf = txbuf_r;
@@ -886,6 +886,14 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		}
 	}
 	
+	if((red == 0 || feof(file_r)) && (green == 0 || feof(file_g)) && (blue == 0 || feof(file_b)))
+	{
+		fprintf(stderr, "End of the process\n");
+		fl2k_stop_tx(dev);
+		do_exit = 1;
+		return 0;
+	}
+	
 	/*if(!(green == 1 && feof(file_g)) || !(green == 1 && feof(file_g)) && !(green == 1 && feof(file_g)))
 	{
 		
@@ -940,7 +948,7 @@ int main(int argc, char **argv)
 	char *filename2_b = NULL;
 	char *filename_audio = NULL;
 	
-	//pipe_buf = malloc(1310720);
+	//pipe_buf = malloc(FL2K_BUF_LEN);
 	
 	/*if (pipe_buf == NULL)
 	{
@@ -949,7 +957,7 @@ int main(int argc, char **argv)
 		return -1;
 	}*/
 	
-	//setvbuf(stdout,pipe_buf,_IOLBF,1310720);
+	//setvbuf(stdout,pipe_buf,_IOLBF,FL2K_BUF_LEN);
 	
 	int option_index = 0;
 	static struct option long_options[] = {
