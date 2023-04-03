@@ -426,7 +426,9 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 
 	pthread_cond_signal(&cb_cond);
 
-	data_info->sampletype_signed = 1;
+	data_info->sampletype_signed_r = 1;
+	data_info->sampletype_signed_g = 1;
+	data_info->sampletype_signed_b = 1;
 	data_info->r_buf = (char *)txbuf;
 }
 

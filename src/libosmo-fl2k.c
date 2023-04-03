@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <libusb.h>
+#include "libusb.h"
 #include <pthread.h>
 
 #ifndef _WIN32
@@ -122,6 +122,142 @@ static fl2k_dongle_t known_devices[] = {
 #define CTRL_OUT	(LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_OUT)
 #define CTRL_TIMEOUT	300
 #define BULK_TIMEOUT	0
+
+/*int fl2k_resample_to_freq_old(fl2k_data_info_t *data_info, uint32_t orate0,char color)
+{
+	int resampled = 0;
+	double irate = 0;
+	void * ibuf = NULL;
+	size_t ilen = 0;
+	char *buf_out;
+	short *buf_res;
+	
+	if(color == 'R')
+	{
+		irate = (float)data_info->r_rate;
+		ibuf = data_info->r_buf_res;
+		ilen = data_info->r_buf_len;
+		resampled = data_info->r_sample_resampled;
+		buf_out = data_info->r_buf;
+		buf_res = data_info->r_buf_res;
+	}
+	if(color == 'G')
+	{
+		irate = (float)data_info->g_rate;
+		ibuf = data_info->g_buf_res;
+		ilen = data_info->g_buf_len;
+		resampled = data_info->g_sample_resampled;
+		buf_out = data_info->g_buf;
+		buf_res = data_info->g_buf_res;
+	}
+	if(color == 'B')
+	{
+		irate = (float)data_info->b_rate;
+		ibuf = data_info->b_buf_res;
+		ilen = data_info->b_buf_len;
+		resampled = data_info->b_sample_resampled;
+		buf_out = data_info->b_buf;
+		buf_res = data_info->b_buf_res;
+	}
+	
+	unsigned int i = 0;
+	char const *     const arg0 = "", * engine = "";
+	
+	double          const orate = (float)orate0;
+	unsigned        const chans = (unsigned)1;//nb channel
+	soxr_datatype_t const itype = (soxr_datatype_t)3;
+	unsigned        const ospec = (soxr_datatype_t)11;
+	unsigned long const q_recipe= 0;
+	unsigned long const q_flags = 0;
+	double   const passband_end = 0;
+	double const stopband_begin = 0;
+	double const phase_response = -1;
+	int       const use_threads = 2;
+	soxr_datatype_t const otype = ospec & 3;
+	
+	soxr_quality_spec_t       q_spec = soxr_quality_spec(q_recipe, q_flags);
+	soxr_io_spec_t            io_spec = soxr_io_spec(itype, otype);
+	soxr_runtime_spec_t const runtime_spec = soxr_runtime_spec(!use_threads);
+	
+	// Allocate resampling input and output buffers in proportion to the input
+	// and output rates:
+	size_t const osize = soxr_datatype_size(otype) * chans;
+	size_t const isize = soxr_datatype_size(itype) * chans;
+	size_t const olen = FL2K_BUF_LEN;
+	void * const obuf = malloc(osize * olen);
+	short *obuf16 = (void *)obuf;
+	//input_context_t icontext;
+	size_t odone, clips = 0;
+	soxr_error_t error;
+	soxr_t soxr;
+	*/
+	/*fprintf(stderr,"---------------------------------\n");
+	fprintf(stderr,"irate = %d\n",(int)irate);
+	fprintf(stderr,"orate = %d\n",(int)orate);
+	fprintf(stderr,"olen = %d\n",(int)olen);
+	fprintf(stderr,"ilen = %d\n",(int)ilen);
+	fprintf(stderr,"osize = %d\n",(int)osize);
+	fprintf(stderr,"isize = %d\n",(int)isize);
+	fprintf(stderr,"\nobuf = malloc(%d)\n",(int)(osize * olen));
+	fprintf(stderr,"ibuf = malloc(%d)\n",(int)(isize * ilen));
+	fprintf(stderr,"fl2K_buf_len = %d\n",FL2K_BUF_LEN);
+	fprintf(stderr,"---------------------------------\n");*/
+	/*
+	// Overrides (if given):
+	if (passband_end   > 0) q_spec.passband_end   = passband_end / 100;
+	if (stopband_begin > 0) q_spec.stopband_begin = stopband_begin / 100;
+	if (phase_response >=0) q_spec.phase_response = phase_response;
+	io_spec.flags = ospec & ~7u;
+	
+	// Create a stream resampler:
+	soxr = soxr_create(
+	irate, orate, chans,         // Input rate, output rate, # of channels.
+	&error,                         // To report any error during creation.
+	&io_spec, &q_spec, &runtime_spec);
+	
+	if(resampled)
+	{
+		if (!error)                      // Register input_fn with the resampler:
+		{
+			//set input buffer
+			error = soxr_set_input_fn(soxr, (soxr_input_fn_t)soxr_input_fn, ibuf, ilen);
+		}
+		
+		if (!error)                         // If all is well, run the resampler:
+		{
+			engine = soxr_engine(soxr);
+			
+			// Resample in blocks:
+			odone = soxr_output(soxr, obuf, olen);
+			error = soxr_error(soxr);            // Check if any soxr error occurred.
+			clips = *soxr_num_clips(soxr);     // Can occur only with integer output.
+			
+			//resize to 8bit
+			i = 0;
+			while(i < FL2K_BUF_LEN)
+			{
+				buf_out[i] = obuf16[i];
+				i++;
+			}
+		}
+	}
+	else
+	{
+		//resize to 8bit
+		i = 0;
+		while(i < FL2K_BUF_LEN)
+		{
+			buf_out[i] = buf_res[i];
+			i++;
+		}
+	}
+	
+	// Tidy up:
+	soxr_delete(soxr);
+	free(obuf);
+	//free(ibuf);
+	return 0;
+}*/
 
 static int fl2k_read_reg(fl2k_dev_t *dev, uint16_t reg, uint32_t *val)
 {
@@ -234,7 +370,7 @@ int fl2k_set_sample_rate(fl2k_dev_t *dev, uint32_t target_freq)
 	if (!dev)
 		return FL2K_ERROR_INVALID_PARAM;
 
-	/* Output divider (accepts value 1-15) 
+	/* Output divider (accepts value 1-15)
 	 * works, but adds lots of phase noise, so do not use it */
 	out_div = 1;
 
@@ -263,9 +399,14 @@ int fl2k_set_sample_rate(fl2k_dev_t *dev, uint32_t target_freq)
 	dev->rate = sample_clock;
 
 	if (fabs(error) > 1)
+	{
 		fprintf(stderr, "Requested sample rate %d not possible, using"
-		                " %f, error is %f\n", target_freq, sample_clock, error); 
-
+		                " %f, error is %f\n", target_freq, sample_clock, error);
+	}
+	else//show frequency used
+	{
+		fprintf(stderr, "Using sample rate %f\n", sample_clock);
+	}
 	return fl2k_write_reg(dev, 0x802c, result_reg);
 }
 
@@ -464,7 +605,7 @@ int fl2k_open(fl2k_dev_t **out_dev, uint32_t index)
 
 found:
 	*out_dev = dev;
-
+	fprintf(stderr, "Opening device %d\n", index);
 	return 0;
 err:
 	if (dev) {
@@ -791,7 +932,7 @@ static void *fl2k_usb_worker(void *arg)
 	pthread_cond_signal(&dev->buf_cond);
 
 	/* wait for sample worker thread to finish before freeing buffers */
-	pthread_join(dev->sample_worker_thread, NULL);  
+	pthread_join(dev->sample_worker_thread, NULL);
 	_fl2k_free_async_buffers(dev);
 	dev->async_status = next_status;
 
@@ -916,13 +1057,13 @@ static void *fl2k_sample_worker(void *arg)
 
 		/* Re-arrange and copy bytes in buffer for DACs */
 		fl2k_convert_r(out_buf, data_info.r_buf, dev->xfer_buf_len,
-			       data_info.sampletype_signed ? 128 : 0);
+			       data_info.sampletype_signed_r ? 128 : 0);
 
 		fl2k_convert_g(out_buf, data_info.g_buf, dev->xfer_buf_len,
-			       data_info.sampletype_signed ? 128 : 0);
+			       data_info.sampletype_signed_g ? 128 : 0);
 
 		fl2k_convert_b(out_buf, data_info.b_buf, dev->xfer_buf_len,
-			       data_info.sampletype_signed ? 128 : 0);
+			       data_info.sampletype_signed_b ? 128 : 0);
 
 		xfer_info->seq = buf_cnt++;
 		xfer_info->state = BUF_FILLED;
@@ -1044,7 +1185,7 @@ int fl2k_i2c_read(fl2k_dev_t *dev, uint8_t i2c_addr, uint8_t reg_addr, uint8_t *
 		if (r < 0)
 			return r;
 
-		/* check if operation completed */ 
+		/* check if operation completed */
 		if (reg & (1 << 31)) {
 			timeout = 0;
 			break;
@@ -1099,7 +1240,7 @@ int fl2k_i2c_write(fl2k_dev_t *dev, uint8_t i2c_addr, uint8_t reg_addr, uint8_t 
 		if (r < 0)
 			return r;
 
-		/* check if operation completed */ 
+		/* check if operation completed */
 		if (reg & (1 << 31)) {
 			timeout = 0;
 			break;

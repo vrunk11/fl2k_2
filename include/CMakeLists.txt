@@ -21,5 +21,6 @@
 install(FILES
     osmo-fl2k.h
     osmo-fl2k_export.h
+	soxr.h
     DESTINATION include
 )

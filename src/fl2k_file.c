@@ -52,10 +52,20 @@
 
 static fl2k_dev_t *dev = NULL;
 
+soxr_t resampler_r = NULL;
+soxr_t resampler_g = NULL;
+soxr_t resampler_b = NULL;
+
 static volatile int do_exit = 0;
 static volatile int repeat = 1;
 
-uint32_t samp_rate = 100000000;
+uint32_t input_sample_rate = 100000000;
+uint32_t output_sample_rate = 100000000;
+
+int resample = 0;
+
+//buff size
+uint32_t input_buf_size = FL2K_BUF_LEN;
 
 //input file
 FILE *file_r;
@@ -67,10 +77,20 @@ FILE *file2_g;
 FILE *file2_b;
 FILE *file_audio;
 
-//buffer for tx
-char *txbuf_r = NULL;
-char *txbuf_g = NULL;
-char *txbuf_b = NULL;
+//input buffer
+char *inbuf_r = NULL;
+char *inbuf_g = NULL;
+char *inbuf_b = NULL;
+
+//resample buffer
+short *resbuf_r = NULL;
+short *resbuf_g = NULL;
+short *resbuf_b = NULL;
+
+//output buffer
+char *outbuf_r = NULL;
+char *outbuf_g = NULL;
+char *outbuf_b = NULL;
 
 //chanel activation
 int red = 0;
@@ -137,7 +157,9 @@ int read_mode = 0;//0 = multitthreading / 1 = hybrid (R --> GB) / 2 = hybrid (RG
 //pipe mode
 char pipe_mode = 'A';
 
-int sample_type = 1;// 1 == signed   0 == unsigned
+int sample_type_r = 1;// 1 == signed   0 == unsigned
+int sample_type_g = 1;// 1 == signed   0 == unsigned
+int sample_type_b = 1;// 1 == signed   0 == unsigned
 
 char video_standard = 0;
 
@@ -164,6 +186,42 @@ pthread_t thread_r;
 pthread_t thread_g;
 pthread_t thread_b;
 
+//thread for resampling
+pthread_t thread_r_res;
+pthread_t thread_g_res;
+pthread_t thread_b_res;
+
+typedef struct soxr_resample_data {//used with soxr and pthread
+	soxr_t soxr;
+	fl2k_data_info_t *data_info;
+	int *state_resample;
+	int *state_process;
+	char color;
+} resample_data;
+
+resample_data soxr_data_r;
+resample_data soxr_data_g;
+resample_data soxr_data_b;
+
+//process synchronisation
+//0 = initialisation | 1 = ready | 2 = processing | 3 = finished
+int resample_r_state = 0;
+int resample_g_state = 0;
+int resample_b_state = 0;
+
+int process_r_state = 0;
+int process_g_state = 0;
+int process_b_state = 0;
+
+//pointer to variable
+int *resample_r_state_ptr = &resample_r_state;
+int *resample_g_state_ptr = &resample_g_state;
+int *resample_b_state_ptr = &resample_b_state;
+
+int *process_r_state_ptr = &process_r_state;
+int *process_g_state_ptr = &process_g_state;
+int *process_b_state_ptr = &process_b_state;
+
 void usage(void)
 {
 	fprintf(stderr,
@@ -186,6 +244,7 @@ void usage(void)
 		"\t[-R8 interpret R input as 8 bit\n"
 		"\t[-G8 interpret G input as 8 bit\n"
 		"\t[-B8 interpret B input as 8 bit\n"
+		"\t[-resample active output resampling\n"
 		"\t[-signR interpret R input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
 		"\t[-signG interpret G input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
 		"\t[-signB interpret B input as (1 = signed / 0 = unsigned) or (s = signed / u = unsigned)\n"
@@ -222,7 +281,9 @@ void usage(void)
 		"\t[-audioOffset offset audio from a duration of x frame\n"
 		"\t[-pipeMode (default = A) option : A = Audio file / R = output of R / G = output of G / B = output of B\n"
 		"\t[-readMode (default = 0) option : 0 = multit-threading (RGB) / 1 = hybrid (R --> GB) / 2 = hybrid (RG --> B) / 3 = sequential (R -> G -> B)\n"
-	);
+		"\n-info-version------------------------------------------------------\n\n"
+		"runtime=%s API="SOXR_THIS_VERSION_STR"\n",
+	soxr_version());
 	exit(1);
 }
 
@@ -252,6 +313,186 @@ static void sighandler(int signum)
 	do_exit = 1;
 }
 #endif
+
+static size_t soxr_input_fn(void * ibuf, soxr_cbuf_t * buf, size_t len)
+{
+	*buf = ibuf;
+	//memcpy(ibuf,copyinbuf);
+	return len+1;//+1 to avoid looping
+}
+
+void resampler_close(soxr_t soxr)
+{
+	soxr_delete(soxr);
+}
+
+void resampler_open(fl2k_data_info_t *data_info, soxr_t *soxr, uint32_t orate0, char color)
+{
+	double irate = 0;
+	void * ibuf = NULL;
+	size_t ilen = 0;
+	
+	if(color == 'R')
+	{
+		irate = (float)data_info->r_rate;
+		ibuf = data_info->r_buf_res;
+		ilen = data_info->r_buf_len;
+	}
+	if(color == 'G')
+	{
+		irate = (float)data_info->g_rate;
+		ibuf = data_info->g_buf_res;
+		ilen = data_info->g_buf_len;
+	}
+	if(color == 'B')
+	{
+		irate = (float)data_info->b_rate;
+		ibuf = data_info->b_buf_res;
+		ilen = data_info->b_buf_len;
+	}
+	
+	unsigned int i = 0;
+	char const *     const arg0 = "", * engine = "";
+	
+	double          const orate = (float)orate0;
+	unsigned        const chans = (unsigned)1;//nb channel
+	soxr_datatype_t const itype = (soxr_datatype_t)3;
+	unsigned        const ospec = (soxr_datatype_t)11;
+	unsigned long const q_recipe= 0;//SOXR_16_BITQ;//between (0-3) SOXR_16_BITQ = 3
+	unsigned long const q_flags = 0;
+	double   const passband_end = 0;
+	double const stopband_begin = 0;
+	double const phase_response = -1;
+	int       const use_threads = 2;
+	soxr_datatype_t const otype = ospec & 3;
+	
+	soxr_quality_spec_t       q_spec = soxr_quality_spec(q_recipe, q_flags);
+	soxr_io_spec_t            io_spec = soxr_io_spec(itype, otype);
+	soxr_runtime_spec_t const runtime_spec = soxr_runtime_spec(!use_threads);
+	
+	// Allocate resampling input and output buffers in proportion to the input
+	// and output rates:
+	size_t const osize = soxr_datatype_size(otype) * chans;
+	size_t const isize = soxr_datatype_size(itype) * chans;
+	size_t const olen = FL2K_BUF_LEN;
+	size_t odone, clips = 0;
+	soxr_error_t error;
+	
+	// Overrides (if given):
+	if (passband_end   > 0) q_spec.passband_end   = passband_end / 100;
+	if (stopband_begin > 0) q_spec.stopband_begin = stopband_begin / 100;
+	if (phase_response >=0) q_spec.phase_response = phase_response;
+	io_spec.flags = ospec & ~7u;
+	
+	// Create a stream resampler:
+	*soxr = soxr_create(
+	irate, orate, chans,         // Input rate, output rate, # of channels.
+	&error,                         // To report any error during creation.
+	&io_spec, &q_spec, &runtime_spec);
+	
+	if (!error)                      // Register input_fn with the resampler:
+	{
+		//set input buffer
+		error = soxr_set_input_fn(*soxr, (soxr_input_fn_t)soxr_input_fn, ibuf, ilen);
+	}
+
+	fprintf(stderr,"engine inside = %s\n",soxr_engine(*soxr));
+}
+
+void fl2k_resample_to_freq(resample_data *soxr_data)
+{
+	soxr_t soxr = soxr_data->soxr;
+	fl2k_data_info_t *data_info = soxr_data->data_info;
+	char color = soxr_data->color;
+	
+	int resampled = 0;
+	char *buf_out;
+	short *buf_res;
+	int *process_state = soxr_data->state_process;
+	int *resample_state = soxr_data->state_resample;
+	
+	if(color == 'R')
+	{
+		resampled = data_info->r_sample_resampled;
+		buf_out = data_info->r_buf;
+		buf_res = data_info->r_buf_res;
+	}
+	if(color == 'G')
+	{
+		resampled = data_info->g_sample_resampled;
+		buf_out = data_info->g_buf;
+		buf_res = data_info->g_buf_res;
+	}
+	if(color == 'B')
+	{
+		resampled = data_info->b_sample_resampled;
+		buf_out = data_info->b_buf;
+		buf_res = data_info->b_buf_res;
+	}
+	
+	unsigned int i = 0;
+	size_t const olen = FL2K_BUF_LEN;
+	void * const obuf = malloc(2 * olen);
+	short *obuf16 = (void *)obuf;
+
+	if(*resample_state != 0)//if not first call
+	{
+		//set status to ready
+		*resample_state = 1;
+			
+		//wait fl2K_callback to be ready
+		while(*process_state != 1){usleep(1);}
+		
+		//set status to processing
+		//*resample_state = 2;
+		//process data
+		soxr_output(soxr, obuf, olen);
+		//resize to 8bit and clip value
+		//fprintf(stderr,"r\n");
+		i = 0;
+		while(i < FL2K_BUF_LEN)
+		{
+			if(obuf16[i] > 255)
+			{
+				buf_out[i] = 255;
+			}
+			else if(obuf16[i] < 0)
+			{
+				buf_out[i] = 0;
+			}
+			else
+			{
+				buf_out[i] = obuf16[i];
+			}
+			
+			i++;
+		}
+	}
+	else//initialisation
+	{
+		//set status to ready
+		*resample_state = 1;
+			
+		//wait fl2K_callback to be ready
+		while(*process_state != 1){usleep(1);}
+		//set status to processing
+		//*resample_state = 2;
+		//set empty buffer while first data are processed
+		i = 0;
+		while(i < FL2K_BUF_LEN)
+		{
+			buf_out[i] = 0;
+			i++;
+		}
+	}
+	
+	//set status to finished
+	*resample_state = 3;
+	//wait fl2K_callback to finish
+	while(*process_state != 3){usleep(1);}
+	
+	free(obuf);
+}
 
 //compute number of sample to skip
 unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long bufsize,char standard)
@@ -289,13 +530,14 @@ unsigned long calc_nb_skip(long sample_cnt,int linelength,long frame_lengt,long 
 int read_sample_file(void *inpt_color)
 {
 	//parametter
-	void *buffer = NULL;
+	char *buffer = NULL;
+	short *resbuffer = malloc(input_buf_size*2);//used for cast 8 bit to 16 bit
 	FILE *stream = NULL;
 	FILE *stream2 = NULL;
 	FILE *streamA = NULL;
 	int istbc = 0;
 	char color = (char *) inpt_color;
-	//uint32_t sample_rate = samp_rate;
+	//uint32_t sample_rate = input_sample_rate;
 	double *chroma_gain = NULL;
 	double *ire_level = NULL;
 	double signal_gain = 1;
@@ -334,10 +576,15 @@ int read_sample_file(void *inpt_color)
 	uint32_t *line_cnt = NULL;
 	uint32_t *line_sample_cnt = NULL;
 	uint32_t *field_cnt = NULL;
+	
+	int *process_state = NULL;
+	int *resample_state = NULL;
 
 	if(color == 'R')
 	{
-		buffer = txbuf_r;
+		process_state = process_r_state_ptr;
+		resample_state = resample_r_state_ptr;
+		buffer = inbuf_r;
 		stream = file_r;
 		stream2 = file2_r;
 		istbc = tbcR;
@@ -366,7 +613,9 @@ int read_sample_file(void *inpt_color)
 	}
 	else if(color == 'G')
 	{
-		buffer = txbuf_g;
+		process_state = process_g_state_ptr;
+		resample_state = resample_g_state_ptr;
+		buffer = inbuf_g;
 		stream = file_g;
 		stream2 = file2_g;
 		istbc = tbcG;
@@ -395,7 +644,9 @@ int read_sample_file(void *inpt_color)
 	}
 	else if(color == 'B')
 	{
-		buffer = txbuf_b;
+		process_state = process_b_state_ptr;
+		resample_state = resample_b_state_ptr;
+		buffer = inbuf_b;
 		stream = file_b;
 		stream2 = file2_b;
 		istbc = tbcB;
@@ -455,7 +706,7 @@ int read_sample_file(void *inpt_color)
 		audio_frame = ((88200/30) * 2);
 	}
 	
-	unsigned long buf_size = (FL2K_BUF_LEN + (is16 * FL2K_BUF_LEN));
+	unsigned long buf_size = (input_buf_size + (is16 * input_buf_size));
 	
 	if(istbc == 1)//compute buf size
 	{
@@ -464,7 +715,7 @@ int read_sample_file(void *inpt_color)
 	
 	buf_size += sample_skip;
 	
-	unsigned char *tmp_buf = malloc(FL2K_BUF_LEN);
+	unsigned char *tmp_buf = malloc(input_buf_size);//8bit data so we can use input_buf_size
 	unsigned char *audio_buf = malloc(audio_frame);
 	char *audio_buf_signed = (void *)audio_buf;
 	unsigned char *calc = malloc(buf_size);
@@ -478,6 +729,13 @@ int read_sample_file(void *inpt_color)
 	short *value16_2_signed = (void *)&value16_2;
 	char *value8_signed = (void *)&value8;
 	char *value8_2_signed = (void *)&value8_2;
+	
+	//set status to ready
+	*process_state = 1;
+	//wait resampler
+	if(resample)while(*resample_state != 1){usleep(1);}
+	//set status to processing
+	//*process_state = 2;
 	
 	if (tmp_buf == NULL || calc == NULL)
 	{
@@ -540,7 +798,7 @@ int read_sample_file(void *inpt_color)
 			//write audio file to stdout only if its not a terminal
 			if(isatty(STDOUT_FILENO) == 0 && is_sync_a)
 			{
-				//write(stdout, tmp_buf, FL2K_BUF_LEN);
+				//write(stdout, tmp_buf, input_buf_size);
 				fread(audio_buf_signed,audio_frame,1,streamA);
 				//write(stdout, audio_buf_signed, audio_frame);
 				fwrite(audio_buf, audio_frame,1,stdout);
@@ -690,9 +948,15 @@ int read_sample_file(void *inpt_color)
 			}
 		}
 		
+		//fix sign and cast to 16 bit
 		if(!is_signed)
 		{
 			tmp_buf[i] = tmp_buf[i] - 128;
+			resbuffer[i] = tmp_buf[i];
+		}
+		else
+		{
+			resbuffer[i] = tmp_buf[i];
 		}
 		
 		i += 1;//on avance tmp_buff de 1
@@ -716,30 +980,53 @@ int read_sample_file(void *inpt_color)
 		*line_sample_cnt += (1 + is16);
 	}
 	
-	memcpy(buffer, tmp_buf, FL2K_BUF_LEN);
+	//set status to finished
+	*process_state = 3;
+	//wait resampler to finish
+	if(resample)while(*resample_state != 3){usleep(1);}
+	
+	if(resample)
+	{
+		if(color == 'R')
+		{
+			memcpy(resbuf_r, resbuffer, input_buf_size*2);
+		}
+		if(color == 'G')
+		{
+			memcpy(resbuf_g, resbuffer, input_buf_size*2);
+		}
+		if(color == 'B')
+		{
+			memcpy(resbuf_b, resbuffer, input_buf_size*2);
+		}
+	}
+	else
+	{
+		if(color == 'R')
+		{
+			memcpy(outbuf_r, tmp_buf, input_buf_size);
+		}
+		if(color == 'G')
+		{
+			memcpy(outbuf_g, tmp_buf, input_buf_size);
+		}
+		if(color == 'B')
+		{
+			memcpy(outbuf_b, tmp_buf, input_buf_size);
+		}
+	}
+	
 	if(isatty(STDOUT_FILENO) == 0 && use_pipe)
 	{
-		fwrite(tmp_buf, FL2K_BUF_LEN,1,stdout);
+		fwrite(tmp_buf, input_buf_size,1,stdout);
 		fflush(stdout);
 	}
 	
+	free(resbuffer);
 	free(tmp_buf);
 	free(audio_buf);
 	free(calc);
 	free(calc2);
-	
-	if(color == 'R')
-	{
-		pthread_exit(thread_r);
-	}
-	else if(color == 'G')
-	{
-		pthread_exit(thread_g);
-	}
-	else if(color == 'B')
-	{
-		pthread_exit(thread_b);
-	}
 	return 0;
 }
 
@@ -759,29 +1046,79 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	}
 	
 	//set sign (signed = 1 , unsigned = 0)
-	data_info->sampletype_signed = sample_type;
+	data_info->sampletype_signed_r = sample_type_r;
+	data_info->sampletype_signed_g = sample_type_g;
+	data_info->sampletype_signed_b = sample_type_b;
 	
 	//send the bufer with a size of (1280 * 1024) = 1310720
 	if(red == 1)
 	{
-		data_info->r_buf = txbuf_r;
+		data_info->r_buf_res = resbuf_r;
+		data_info->r_buf = outbuf_r;
+		data_info->r_buf_len = input_buf_size*2;
+		data_info->r_rate = input_sample_rate;
+		data_info->r_sample_resampled = resample;
 	}
 	if(green == 1)
 	{
-		//printf("Valeur : %d %u %x\n",*txbuf_g,*txbuf_g,*txbuf_g);
-		data_info->g_buf = txbuf_g;
+		data_info->g_buf_res = resbuf_g;
+		data_info->g_buf = outbuf_g;
+		data_info->g_buf_len = input_buf_size*2;
+		data_info->g_rate = input_sample_rate;
+		data_info->g_sample_resampled = resample;
 	}
 	if(blue == 1)
 	{
-		data_info->b_buf = txbuf_b;
+		data_info->b_buf_res = resbuf_b;
+		data_info->b_buf = outbuf_b;
+		data_info->b_buf_len = input_buf_size*2;
+		data_info->b_rate = input_sample_rate;
+		data_info->b_sample_resampled = resample;
 	}
-
+	
+	//initialisation
+	//start resampler if not initialisaed
+	if(soxr_data_r.state_process == 0 && red == 1)
+	{
+		resampler_open(data_info, &resampler_r,fl2k_get_sample_rate(dev), 'R');
+		//resampling data
+		soxr_data_r.soxr = resampler_r;
+		soxr_data_r.state_process = &process_r_state;
+		soxr_data_r.state_resample = &resample_r_state;
+		soxr_data_r.data_info = data_info;
+		soxr_data_r.color = 'R';
+	}
+	if(soxr_data_g.state_process == 0 && green == 1)
+	{
+		resampler_open(data_info, &resampler_g, fl2k_get_sample_rate(dev), 'G');
+		fprintf(stderr,"engine outside = %s\n",soxr_engine(resampler_g));
+		//resampling data
+		soxr_data_g.soxr = resampler_g;
+		soxr_data_g.state_process = &process_g_state;
+		soxr_data_g.state_resample = &resample_g_state;
+		soxr_data_g.data_info = data_info;
+		soxr_data_g.color = 'G';
+	}
+	if(soxr_data_b.state_process == 0 && blue == 1)
+	{
+		resampler_open(data_info, &resampler_b, fl2k_get_sample_rate(dev), 'B');
+		//resampling data
+		soxr_data_b.soxr = resampler_b;
+		soxr_data_b.state_process = &process_b_state;
+		soxr_data_b.state_resample = &resample_b_state;
+		soxr_data_b.data_info = data_info;
+		soxr_data_b.color = 'B';
+	}
+	
 	//read until buffer is full
 	//RED
 	if(red == 1 && !feof(file_r))
 	{
+		//process file
 		pthread_create(&thread_r,NULL,read_sample_file,'R');
-		
+		//resample
+		if(resample)pthread_create(&thread_r_res,NULL,fl2k_resample_to_freq,&soxr_data_r);
+
 		if (ferror(file_r))
 		{
 			fprintf(stderr, "(RED) : File Error\n");
@@ -798,6 +1135,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		if(red == 1)
 		{
 			pthread_join(thread_r,NULL);
+			if(resample)pthread_join(thread_r_res,NULL);
 		}
 	}
 	
@@ -805,6 +1143,8 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	if(green == 1 && !feof(file_g))
 	{
 		pthread_create(&thread_g,NULL,read_sample_file,'G');
+		//resample
+		if(resample)pthread_create(&thread_g_res,NULL,fl2k_resample_to_freq,&soxr_data_g);
 		
 		if (ferror(file_g))
 		{
@@ -822,6 +1162,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		if(green == 1)
 		{
 			pthread_join(thread_g,NULL);
+			if(resample)pthread_join(thread_g_res,NULL);
 		}
 	}
 	else if(read_mode == 2)
@@ -829,10 +1170,12 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		if(red == 1)
 		{
 			pthread_join(thread_r,NULL);
+			if(resample)pthread_join(thread_r_res,NULL);
 		}
 		if(green == 1)
 		{
 			pthread_join(thread_g,NULL);
+			if(resample)pthread_join(thread_g_res,NULL);
 		}
 	}
 	
@@ -840,6 +1183,8 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	if(blue == 1 && !feof(file_b))
 	{
 		pthread_create(&thread_b,NULL,read_sample_file,'B');
+		//resample
+		if(resample)pthread_create(&thread_b_res,NULL,fl2k_resample_to_freq,&soxr_data_b);
 		
 		if(ferror(file_b))
 		{
@@ -857,14 +1202,17 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		if(red == 1)
 		{
 			pthread_join(thread_r,NULL);
+			if(resample)pthread_join(thread_r_res,NULL);
 		}
 		if(green == 1)
 		{
 			pthread_join(thread_g,NULL);
+			if(resample)pthread_join(thread_g_res,NULL);
 		}
 		if(blue == 1)
 		{
 			pthread_join(thread_b,NULL);
+			if(resample)pthread_join(thread_b_res,NULL);
 		}
 	}
 	else if(read_mode == 3 || read_mode == 2)
@@ -872,6 +1220,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		if(blue == 1)
 		{
 			pthread_join(thread_b,NULL);
+			if(resample)pthread_join(thread_b_res,NULL);
 		}
 	}
 	else if(read_mode == 1)
@@ -879,19 +1228,37 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		if(green == 1)
 		{
 			pthread_join(thread_g,NULL);
+			if(resample)pthread_join(thread_g_res,NULL);
 		}
 		if(blue == 1)
 		{
 			pthread_join(thread_b,NULL);
+			if(resample)pthread_join(thread_b_res,NULL);
 		}
 	}
+	
+	//close threads
+	/*if(red == 1)
+	{
+		pthread_exit(thread_r);
+		pthread_exit(thread_r_res);
+	}
+	if(green == 1)
+	{
+		pthread_exit(thread_g);
+		pthread_exit(thread_g_res);
+	}
+	if(blue == 1)
+	{
+		pthread_exit(thread_b);
+		pthread_exit(thread_b_res);
+	}*/
 	
 	if((red == 0 || feof(file_r)) && (green == 0 || feof(file_g)) && (blue == 0 || feof(file_b)))
 	{
 		fprintf(stderr, "End of the process\n");
 		fl2k_stop_tx(dev);
 		do_exit = 1;
-		return 0;
 	}
 	
 	/*if(!(green == 1 && feof(file_g)) || !(green == 1 && feof(file_g)) && !(green == 1 && feof(file_g)))
@@ -948,7 +1315,7 @@ int main(int argc, char **argv)
 	char *filename2_b = NULL;
 	char *filename_audio = NULL;
 	
-	//pipe_buf = malloc(FL2K_BUF_LEN);
+	//pipe_buf = malloc(input_buf_size);
 	
 	/*if (pipe_buf == NULL)
 	{
@@ -957,7 +1324,7 @@ int main(int argc, char **argv)
 		return -1;
 	}*/
 	
-	//setvbuf(stdout,pipe_buf,_IOLBF,FL2K_BUF_LEN);
+	//setvbuf(stdout,pipe_buf,_IOLBF,input_buf_size);
 	
 	int option_index = 0;
 	static struct option long_options[] = {
@@ -1005,6 +1372,7 @@ int main(int argc, char **argv)
 		{"MaxValueR", 1, 0, 41},
 		{"MaxValueG", 1, 0, 42},
 		{"MaxValueB", 1, 0, 43},
+		{"resample", 0, 0, 44},
 		{0, 0, 0, 0}//reminder : letter value are from 65 to 122
 	};
 
@@ -1019,19 +1387,21 @@ int main(int argc, char **argv)
 		case 's':
 			if((strcmp(optarg, "ntsc" ) == 0) || (strcmp(optarg, "NTSC" ) == 0) || (strcmp(optarg, "Ntsc" ) == 0))
 			{
-				samp_rate = (uint32_t) 14318181;
+				input_sample_rate = (uint32_t) 14318181;
 			}
 			else if((strcmp(optarg, "pal" ) == 0) || (strcmp(optarg, "PAL" ) == 0) || (strcmp(optarg, "Pal" ) == 0))
 			{
-				samp_rate = (uint32_t) 17734475;
+				input_sample_rate = (uint32_t) 17734475;
 			}
 			else
 			{
-				samp_rate = (uint32_t)atof(optarg);
+				input_sample_rate = (uint32_t)atof(optarg);
 			}
 			break;
 		case 'u':
-			sample_type = 0;
+			sample_type_r = 0;
+			sample_type_g = 0;
+			sample_type_b = 0;
 			break;
 		case 'R':
 			red = 1;
@@ -1193,6 +1563,9 @@ int main(int argc, char **argv)
 			break;
 		case 43:
 			max_value_b = atoi(optarg);
+			break;
+		case 44:
+			resample = 1;
 			break;
 		default:
 			usage();
@@ -1370,7 +1743,7 @@ int main(int argc, char **argv)
 	if(override_g_sign != -1){g_sign = override_g_sign;}
 	if(override_b_sign != -1){b_sign = override_b_sign;}
 	
-	if(samp_rate == 17734475 || samp_rate == 17735845)//PAL
+	if(input_sample_rate == 17734475 || input_sample_rate == 17735845)//PAL
 	{
 		start_r = start_r * ((709375 + (1135 * tbcR)) * (1 + r16));// set first frame
 		start_g = start_g * ((709375 + (1135 * tbcB)) * (1 + g16));
@@ -1378,7 +1751,7 @@ int main(int argc, char **argv)
 		start_audio = (start_audio + audio_offset) * ((88200/25) * 2);
 		video_standard = 'P';
 	}
-	else if(samp_rate == 14318181 || samp_rate == 14318170)//NTSC
+	else if(input_sample_rate == 14318181 || input_sample_rate == 14318170)//NTSC
 	{
 		start_r = start_r * ((477750 + (910 * tbcR)) * (1 + r16));//set first frame
 		start_g = start_g * ((477750 + (910 * tbcG)) * (1 + g16));
@@ -1386,7 +1759,42 @@ int main(int argc, char **argv)
 		start_audio = (start_audio + audio_offset) * ((88200/30) * 2);
 		video_standard = 'N';
 	}
+
+//FL2K initialisation
+	fl2k_open(&dev, (uint32_t)dev_index);
+	if (NULL == dev) {
+		fprintf(stderr, "Failed to open fl2k device #%d.\n", dev_index);
+		goto out;
+	}
 	
+	/* Set the sample rate */
+	r = fl2k_set_sample_rate(dev, input_sample_rate);
+	if (r < 0)
+		fprintf(stderr, "WARNING: Failed to set sample rate.\n");
+
+//file and buffer initialisation
+	output_sample_rate = fl2k_get_sample_rate(dev);
+	fprintf(stderr, "output sample rate = %d\n",output_sample_rate);
+
+	if(resample)
+	{
+		input_buf_size = round((FL2K_BUF_LEN / ((double)output_sample_rate / (double)input_sample_rate))+ 0.5);
+		
+		//change to signed for resampling
+		//and reverse output sign
+		if(r_sign == 0) sample_type_r = !sample_type_r;
+		if(g_sign == 0) sample_type_g = !sample_type_g;
+		if(b_sign == 0) sample_type_b = !sample_type_b;
+		r_sign = 1;
+		g_sign = 1;
+		b_sign = 1;
+	}
+	else
+	{
+		input_buf_size = FL2K_BUF_LEN;
+	}
+	fprintf(stderr, "set input_buf_size to : %d\n",input_buf_size);
+
 //RED file
 if(red == 1)
 {
@@ -1399,7 +1807,7 @@ if(red == 1)
 		file_r = fopen(filename_r, "rb");
 		if (!file_r) {
 			fprintf(stderr, "(RED) : Failed to open %s\n", filename_r);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1407,11 +1815,14 @@ if(red == 1)
 		}
 	}
 
-	txbuf_r = malloc(FL2K_BUF_LEN);
-	if (!txbuf_r) {
+	inbuf_r = malloc(input_buf_size);
+	resbuf_r = malloc(input_buf_size*2);
+	outbuf_r = malloc(FL2K_BUF_LEN);
+	if (!inbuf_r || !resbuf_r || !outbuf_r) {
 		fprintf(stderr, "(RED) : malloc error!\n");
 		goto out;
 	}
+	
 }
 
 if(red2 == 1)
@@ -1425,7 +1836,7 @@ if(red2 == 1)
 		file2_r = fopen(filename2_r, "rb");
 		if (!file2_r) {
 			fprintf(stderr, "(RED) : Failed to open %s\n", filename2_r);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1446,7 +1857,7 @@ if(green == 1)
 		file_g = fopen(filename_g, "rb");
 		if (!file_g) {
 			fprintf(stderr, "(GREEN) : Failed to open %s\n", filename_g);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1454,8 +1865,10 @@ if(green == 1)
 		}
 	}
 
-	txbuf_g = malloc(FL2K_BUF_LEN);
-	if (!txbuf_g) {
+	inbuf_g = malloc(input_buf_size);
+	resbuf_g = malloc(input_buf_size*2);
+	outbuf_g = malloc(FL2K_BUF_LEN);
+	if (!inbuf_g || !resbuf_g || !outbuf_g) {
 		fprintf(stderr, "(GREEN) : malloc error!\n");
 		goto out;
 	}
@@ -1472,7 +1885,7 @@ if(green2 == 1)
 		file2_g = fopen(filename2_g, "rb");
 		if (!file2_g) {
 			fprintf(stderr, "(GREEN) : Failed to open %s\n", filename2_g);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1493,7 +1906,7 @@ if(blue == 1)
 		file_b = fopen(filename_b, "rb");
 		if (!file_b) {
 			fprintf(stderr, "(BLUE) : Failed to open %s\n", filename_b);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1501,8 +1914,10 @@ if(blue == 1)
 		}
 	}
 
-	txbuf_b = malloc(FL2K_BUF_LEN);
-	if (!txbuf_b) {
+	inbuf_b = malloc(input_buf_size);
+	resbuf_b = malloc(input_buf_size*2);
+	outbuf_b = malloc(FL2K_BUF_LEN);
+	if (!inbuf_b || !resbuf_b || !outbuf_b) {
 		fprintf(stderr, "(BLUE) : malloc error!\n");
 		goto out;
 	}
@@ -1519,7 +1934,7 @@ if(blue2 == 1)
 		file2_b = fopen(filename2_b, "rb");
 		if (!file2_b) {
 			fprintf(stderr, "(BLUE) : Failed to open %s\n", filename2_b);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1539,7 +1954,7 @@ if(audio == 1)
 		file_audio = fopen(filename_audio, "rb");
 		if (!file_audio) {
 			fprintf(stderr, "(AUDIO) : Failed to open %s\n", filename_audio);
-			return -ENOENT;
+			goto out;
 		}
 		else
 		{
@@ -1548,20 +1963,8 @@ if(audio == 1)
 	}
 }
 
-//next
-
-	fl2k_open(&dev, (uint32_t)dev_index);
-	if (NULL == dev) {
-		fprintf(stderr, "Failed to open fl2k device #%d.\n", dev_index);
-		goto out;
-	}
-
-	r = fl2k_start_tx(dev, fl2k_callback, NULL, 0);
-
-	/* Set the sample rate */
-	r = fl2k_set_sample_rate(dev, samp_rate);
-	if (r < 0)
-		fprintf(stderr, "WARNING: Failed to set sample rate.\n");
+//start fl2K
+r = fl2k_start_tx(dev, fl2k_callback, NULL, 0);
 
 
 #ifndef _WIN32
@@ -1584,12 +1987,38 @@ if(audio == 1)
 
 out:
 
+//close resampler
+	if(resampler_r && red == 1)
+	{
+		resampler_close(resampler_r);
+	}
+	
+	if(resampler_g && green == 1)
+	{
+		resampler_close(resampler_r);
+	}
+	
+	if(resampler_b && blue == 1)
+	{
+		resampler_close(resampler_r);
+	}
+
 //RED
 	if(red == 1)
 	{
-		if (txbuf_r)
+		if(inbuf_r)
 		{
-			free(txbuf_r);
+			free(inbuf_r);
+		}
+		
+		if (resbuf_r)
+		{
+			free(resbuf_r);
+		}
+		
+		if(outbuf_r)
+		{
+			free(outbuf_r);
 		}
 
 		if (file_r && (file_r != stdin))
@@ -1608,9 +2037,19 @@ out:
 	//GREEN
 	if(green == 1)
 	{
-		if (txbuf_g)
+		if (inbuf_g)
 		{
-			free(txbuf_g);
+			free(inbuf_g);
+		}
+		
+		if (resbuf_g)
+		{
+			free(resbuf_g);
+		}
+		
+		if(outbuf_g)
+		{
+			free(outbuf_g);
 		}
 
 		if (file_g && (file_g != stdin))
@@ -1630,9 +2069,19 @@ out:
 	//BLUE	
 	if(blue == 1)
 	{
-		if (txbuf_b)
+		if (inbuf_b)
 		{
-			free(txbuf_b);
+			free(inbuf_b);
+		}
+		
+		if (resbuf_b)
+		{
+			free(resbuf_b);
+		}
+		
+		if(outbuf_b)
+		{
+			free(outbuf_b);
 		}
 
 		if (file_b && (file_b != stdin))

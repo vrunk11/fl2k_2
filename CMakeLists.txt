@@ -67,6 +67,7 @@ endif()
 ########################################################################
 find_package(PkgConfig)
 find_package(LibUSB)
+find_package(Soxr)
 if(WIN32 AND NOT MINGW)
     set(THREADS_USE_PTHREADS_WIN32 true)
 endif()
@@ -74,6 +75,9 @@ find_package(Threads)
 
 if(NOT LIBUSB_FOUND)
     message(FATAL_ERROR "LibUSB 1.0 required to compile libosmo-fl2k")
+endif()
+if(NOT Soxr_FOUND)
+    message(FATAL_ERROR "Soxr required to compile")
 endif()
 if(NOT THREADS_FOUND)
     message(FATAL_ERROR "pthreads(-win32) required to compile libosmo-fl2k")
@@ -84,6 +88,7 @@ endif()
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${LIBUSB_INCLUDE_DIR}
+	${Soxr_INCLUDE_DIRS}
     ${THREADS_PTHREADS_INCLUDE_DIR}
 )
 

@@ -38,8 +38,8 @@
 #include <fcntl.h>
 #define sleep_ms(ms)	usleep(ms*1000)
 #else
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include "getopt/getopt.h"
 #define sleep_ms(ms)	Sleep(ms)
 #endif
@@ -116,7 +116,9 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 	if (!connected)
 		return;
 
-	data_info->sampletype_signed = 1;
+	data_info->sampletype_signed_r = 1;
+	data_info->sampletype_signed_g = 1;
+	data_info->sampletype_signed_b = 1;
 	data_info->r_buf = txbuf;
 
 	while (!do_exit && (left > 0)) {

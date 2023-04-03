@@ -29,6 +29,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <osmo-fl2k_export.h>
+#include <soxr.h>
 
 enum fl2k_error {
 	FL2K_SUCCESS = 0,
@@ -50,10 +51,28 @@ typedef struct fl2k_data_info {
 	int device_error;		/* device error happened, terminate application */
 
 	/* filled in by application */
-	int sampletype_signed;		/* are samples signed or unsigned? */
-	char *r_buf;			/* pointer to red buffer */
-	char *g_buf;			/* pointer to green buffer */
-	char *b_buf;			/* pointer to blue buffer */
+	int sampletype_signed_r;		/* are samples signed or unsigned? */
+	int sampletype_signed_g;		/* are samples signed or unsigned? */
+	int sampletype_signed_b;		/* are samples signed or unsigned? */
+	int r_sample_resampled;		/* are samples signed or unsigned? */
+	int g_sample_resampled;		/* are samples signed or unsigned? */
+	int b_sample_resampled;		/* are samples signed or unsigned? */
+	char *r_buf;			/* pointer to output red buffer */
+	char *g_buf;			/* pointer to output green buffer */
+	char *b_buf;			/* pointer to output blue buffer */
+	
+	short *r_buf_res;			/* pointer to input red buffer to resample */
+	short *g_buf_res;			/* pointer to input green buffer to resample */
+	short *b_buf_res;			/* pointer to input blue buffer to resample */
+	
+	uint32_t r_buf_len;			/* buffer length of input red */
+	uint32_t g_buf_len;			/* buffer length of input green */
+	uint32_t b_buf_len;			/* buffer length of input blue */
+	
+	uint32_t r_rate;			/* sample rate of input red */
+	uint32_t g_rate;			/* sample rate of input green */
+	uint32_t b_rate;			/* sample rate of input blue */
+	
 } fl2k_data_info_t;
 
 typedef struct fl2k_dev fl2k_dev_t;

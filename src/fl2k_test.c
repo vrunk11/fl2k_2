@@ -226,6 +226,7 @@ void fl2k_callback(fl2k_data_info_t *data_info)
 		/* as data is repetitive, it only needs to be handed
 		 * over until all transfer buffers contain the data */
 		data_info->r_buf = buffer;
+		
 		cb_cnt++;
 	}
 }
