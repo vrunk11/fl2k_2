@@ -192,6 +192,8 @@ Windows:
 
 `-CgainB` Control Chroma Gain Level (using color burst)
 
+`-resample` resample the input to the correct output frequency (can fix color decoding on PAL signal)
+
 ## Possible USB Issues
 
 You might see this in Linux:
