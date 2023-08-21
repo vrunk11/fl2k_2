@@ -1,4 +1,4 @@
-Fork of the osmo_fl2K project.
+FL2K_2 : a fork of the osmo_fl2K project.
 
 Turns FL2000-based USB 3.0 to VGA adapters into low cost DACs.
 
