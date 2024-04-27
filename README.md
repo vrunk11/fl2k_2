@@ -80,8 +80,13 @@ Once inside use arguments as stated below example:
 ### Download Dependencies
 
 `sudo apt-get install libusb-1.0-0-dev`
+`sudo apt-get install libsoxr-dev`
+`sudo apt-get install libsoxr0`
+`sudo apt-get install libsoxr-lsr0`
 
-Install the libusb headers if not already present
+Install the libusb and soxr headers if not already present
+
+copy soxr.h in include folder can be downloaded here : https://github.com/chirlu/soxr/tree/master/src/soxr.h
 
 `git clone https://gitea.osmocom.org/sdr/osmo-fl2k
 mkdir osmo-fl2k/build
