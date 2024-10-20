@@ -7,13 +7,17 @@ For more information on sorce see https://osmocom.org/projects/osmo-fl2k/wiki
 This project fork is primarily for use with playing TBC files the following is for that use case.
 but it can also be used as a remplacement of the osmos-fl2K thanks to all the new QOL feature added.
 
+
 # FL2K TBC Player
+
 
 A Simple TBC playback utility, currently only CLI (Command Line Interface)
 
 This will later be both GUI/CLI.
 
+
 ## What is a TBC?
+
 
 Its a digital Time Base Corrected lossless 16-bit video file thats in 1 file for Composite streams and 2 files for S-Video streams.
 
@@ -31,7 +35,9 @@ VGA to RCA [Aliexpress](https://www.aliexpress.com/item/1005002872152601.html?)
 
 VGA to BNC Male/Female [Amazon UK](https://www.amazon.co.uk/gp/product/B0033AF5Y0/) / [Amazon USA](https://www.amazon.com/s?k=VGA+to+BNC+Cable&crid=30JGI1TOFQ5I9&sprefix=vga+to+bnc+cable%2Caps%2C165&ref=nb_sb_noss_1)
 
+
 # Setup
+
 
 ## Standardised Cable Config
 
@@ -75,55 +81,65 @@ Once inside use arguments as stated below example:
 
     fl2k-2.exe -u -s pal -G16 -tbcG -G example.tbc
 
+
 ## Linux
+
 
 ### Download Dependencies
 
-`sudo apt-get install libusb-1.0-0-dev`
-`sudo apt-get install libsoxr-dev`
-`sudo apt-get install libsoxr0`
-`sudo apt-get install libsoxr-lsr0`
+    sudo apt install libusb-1.0-0-dev libsoxr-dev libsoxr0 libsoxr-lsr0
 
-Install the libusb and soxr headers if not already present
+### Install the libusb and soxr headers if not already present
 
-copy soxr.h in include folder can be downloaded here : https://github.com/chirlu/soxr/tree/master/src/soxr.h
+    git clone https://gitea.osmocom.org/sdr/osmo-fl2k
+    mkdir osmo-fl2k/build
+    cd osmo-fl2k/build
 
-`git clone https://gitea.osmocom.org/sdr/osmo-fl2k
-mkdir osmo-fl2k/build
-cd osmo-fl2k/build`
+## Build with CMAKE 
 
-`cmake ../ -DINSTALL_UDEV_RULES=ON
-make -j 3
-sudo make install
-sudo ldconfig`
+    cmake ../ -DINSTALL_UDEV_RULES=ON
+    make -j 3
+    sudo make install
+    sudo ldconfig
 
 Before being able to use the device as a non-root user, the udev rules need to be reloaded:
 
 `sudo udevadm control -R`
 
+&
+
 `sudo udevadm trigger`
 
 ### Download The Player
 
-`git clone https://github.com/vrunk11/fl2k_2/.git fl2k-tbc-player`
+    git clone https://github.com/vrunk11/fl2k_2.git fl2k-tbc-player
+
+## Add soxr.h
+
+Copy soxr.h in `include` folder can be [downloaded here](https://github.com/chirlu/soxr/tree/master/src/soxr.h)
 
 To enter into the install directory use CD
 
-`cd fl2k-tbc-player`
+    cd fl2k-tbc-player
 
-Compile the player with
+Compile the player with:
 
-`sudo compile.sh`
+    sudo ./compile.sh
 
-Run the software with
+Run the software with:
 
-`./fl2k_2 [arguments]`
+    fl2k_file2
+
+This will output the help commandlist if not given an argument. 
 
 ## MacOS
 
+
 Support yet to be Implimented.
 
+
 # Usage
+
 
 As its an VGA R-G-B adapter so there is 3 ADC's
 
@@ -133,21 +149,25 @@ For the Samplerate/TV System you can do `-s ntsc` or `-s pal`
 
 Currently to make tbc playback possible you need to do the 16 to 8 bit conversion with:
 
--R16 for red -G16 for green -B16 for blue
+`-R16` for red `-G16` for green `-B16` for blue
 
 Also needed is removal of the extra line on each frame:
 
--tbcR for red -tbcG for green -tbcB for blue
+`-tbcR` for red `-tbcG` for green `-tbcB` for blue
+
 
 ## Standard Oprational Commands
 
+
 For windows just use fl2k_2.exe
+
 
 ### Composite output on the red channel:
 
+
 Linux:
 
-`./fl2k_2 -u -s ntsc -G16 -tbcG -G example.tbc`
+`fl2k_file2 -u -s ntsc -G16 -tbcG -G example.tbc`
 
 Windows:
 
@@ -157,13 +177,15 @@ Windows:
 
 Linux:
 
-`./fl2k_2 -u -s pal -G16 -tbcG -G example.tbc -B16 -tbcB -B example_chroma.tbc`
+`fl2k_file2 -u -s pal -G16 -tbcG -G example.tbc -B16 -tbcB -B example_chroma.tbc`
 
 Windows:
 
 `fl2k_2.exe -u -s pal -G16 -tbcG -G example.tbc -B16 -tbcB -B example_chroma.tbc`
 
+
 # Commandlist
+
 
 `-d` device_index (default: 0)
 
@@ -199,7 +221,9 @@ Windows:
 
 `-resample` resample the input to the correct output frequency (can fix color decoding on PAL signal)
 
+
 ## Possible USB Issues
+
 
 You might see this in Linux:
 
